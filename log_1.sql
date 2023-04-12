@@ -33,7 +33,8 @@ WHERE event_type = '2_churn' AND id NOT IN (
 
 -- Set the recurring monthly to 0 for the rest of the churn
 UPDATE sale_order_log
-SET recurring_monthly = 0
+SET recurring_monthly = amount_signed,
+    amount_signed = recurring_monthly
 WHERE event_type = '2_churn';
 
 -- First log are changed into creation
