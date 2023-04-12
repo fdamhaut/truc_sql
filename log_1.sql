@@ -1,6 +1,7 @@
 -- Correct Error from 8a8080ed4f75c811cf0e92065a86f4723a4aaced
 UPDATE sale_order_log
-SET recurring_monthly = amount_signed
+SET recurring_monthly = amount_signed,
+    amount_signed = recurring_monthly
 WHERE recurring_monthly < amount_signed AND amount_signed >= 0 AND recurring_monthly != 0;
 
 
@@ -41,26 +42,49 @@ SET event_type = '0_creation'
 WHERE id IN (
     SELECT DISTINCT ON (origin_order_id) id
     FROM sale_order_log
-    ORDER BY origin_order_id, create_date, event_type
+    ORDER BY origin_order_id, create_date, event_type, id
 );
 
 
 -- We correct ensure the first created log of each SO (except the first SO) is transfer 
-UPDATE sale_order_log
-SET event_type = '3_transfer'
-WHERE id IN (
-    SELECT DISTINCT ON (order_id) id
-    FROM sale_order_log
-    WHERE origin_order_id != order_id
-    and amount_signed = recurring_monthly;
-    ORDER BY order_id, create_date, id
+WITH SO as (
+    SELECT id, date_order, origin_order_id, client_order_ref, 
+        currency_id, subscription_state, recurring_monthly
+    FROM sale_order
+    WHERE subscription_state IN ('3_progress', '4_paused')
+    AND id NOT IN (
+        SELECT order_id
+        FROM sale_order_log
+        WHERE (event_type = '3_transfer' AND recurring_monthly = amount_signed)
+         OR event_type = '0_creation'
+    )
 )
-AND order_id NOT IN (
-    SELECT order_id
-    FROM sale_order_log
-    where event_type = '3_transfer'
-    and amount_signed = recurring_monthly
-);
+INSERT INTO sale_order_log (
+    order_id,
+    origin_order_id,
+    subscription_code,
+    event_date,
+    currency_id,
+    subscription_state,
+    recurring_monthly,
+    amount_signed,
+    amount_expansion,
+    amount_contraction,
+    event_type
+)
+SELECT 
+    SO.id, 
+    SO.origin_order_id,
+    SO.client_order_ref, 
+    SO.date_order::date,
+    SO.currency_id,
+    SO.subscription_state,
+    SO.recurring_monthly,
+    SO.recurring_monthly,
+    SO.recurring_monthly,
+    '0',
+    '3_transfer'
+FROM SO;
 
 -- And that the last log of each SO (except the last SO) is also a transfer
 UPDATE sale_order_log
@@ -76,6 +100,12 @@ AND id NOT IN (
     FROM sale_order_log
     WHERE recurring_monthly = 0
     ORDER BY origin_order_id, event_date DESC, event_type DESC
+)
+AND order_id NOT IN (
+    SELECT order_id
+    FROM sale_order_log
+    where event_type = '3_transfer'
+    and recurring_monthly = 0
 );
 
 -- Push event_date to ensure cohesion
