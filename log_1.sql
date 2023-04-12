@@ -11,17 +11,10 @@ FROM sale_order so
 WHERE so.id = log.order_id
   AND event_date < so.start_date;
 
--- -- Delete empty log 
--- DELETE
--- FROM sale_order_log
--- WHERE (amount_signed = 0 OR amount_signed IS NULL)
---   AND recurring_monthly = 0
---   AND (new_enterprise_user = 0 OR amount_signed IS NULL); 
-
 -- Creation that are not the first log are changed into expansion
 UPDATE sale_order_log
 SET event_type = '1_expansion'
-WHERE event_type IN ('0_creation', '3_transfer')
+WHERE event_type = '0_creation'
 AND id NOT IN (
     SELECT DISTINCT ON (origin_order_id) id
     FROM sale_order_log
@@ -59,7 +52,14 @@ WHERE id IN (
     SELECT DISTINCT ON (order_id) id
     FROM sale_order_log
     WHERE origin_order_id != order_id
-    ORDER BY order_id, create_date
+    and amount_signed = recurring_monthly;
+    ORDER BY order_id, create_date, id
+)
+AND order_id NOT IN (
+    SELECT order_id
+    FROM sale_order_log
+    where event_type = '3_transfer'
+    and amount_signed = recurring_monthly
 );
 
 -- And that the last log of each SO (except the last SO) is also a transfer
@@ -156,42 +156,42 @@ SET event_date = GREATEST(sale_order_log.create_date::date, last.date)
 FROM last
 WHERE sale_order_log.event_type = '2_churn' AND sale_order_log.origin_order_id = last.origin_order_id;
 
--- Reconcile based on SO
-WITH last AS (
-    SELECT DISTINCT ON (log.origin_order_id) log.id, so.recurring_monthly, so.subscription_state
-    FROM sale_order_log log
-    JOIN sale_order so ON so.id = log.order_id
-    WHERE so.subscription_state IN ('3_progress', '4_paused')
-    ORDER BY log.origin_order_id, event_date DESC, event_type DESC
-)
-INSERT INTO sale_order_log (
-    order_id,
-    origin_order_id,
-    subscription_code,
-    event_date,
-    currency_id,
-    subscription_state,
-    recurring_monthly,
-    amount_signed,
-    amount_expansion,
-    amount_contraction,
-    event_type
-)
-SELECT 
-    log.order_id, 
-    log.origin_order_id, 
-    log.subscription_code,
-    log.event_date,
-    log.currency_id,
-    last.subscription_state,
-    last.recurring_monthly,
-    last.recurring_monthly - log.recurring_monthly ,
-    GREATEST(last.recurring_monthly - log.recurring_monthly, 0),
-    GREATEST(-last.recurring_monthly + log.recurring_monthly, 0),
-    CASE WHEN last.recurring_monthly - log.recurring_monthly > 0 THEN '1_expansion' ELSE '15_contraction' END
-FROM sale_order_log log
-JOIN last ON last.id = log.id
-WHERE last.recurring_monthly != log.recurring_monthly;
+-- -- Reconcile based on SO
+-- WITH last AS (
+--     SELECT DISTINCT ON (log.origin_order_id) log.id, so.recurring_monthly, so.subscription_state
+--     FROM sale_order_log log
+--     JOIN sale_order so ON so.id = log.order_id
+--     WHERE so.subscription_state IN ('3_progress', '4_paused')
+--     ORDER BY log.origin_order_id, event_date DESC, event_type DESC
+-- )
+-- INSERT INTO sale_order_log (
+--     order_id,
+--     origin_order_id,
+--     subscription_code,
+--     event_date,
+--     currency_id,
+--     subscription_state,
+--     recurring_monthly,
+--     amount_signed,
+--     amount_expansion,
+--     amount_contraction,
+--     event_type
+-- )
+-- SELECT 
+--     log.order_id, 
+--     log.origin_order_id, 
+--     log.subscription_code,
+--     log.event_date,
+--     log.currency_id,
+--     last.subscription_state,
+--     last.recurring_monthly,
+--     last.recurring_monthly - log.recurring_monthly ,
+--     GREATEST(last.recurring_monthly - log.recurring_monthly, 0),
+--     GREATEST(-last.recurring_monthly + log.recurring_monthly, 0),
+--     CASE WHEN last.recurring_monthly - log.recurring_monthly > 0 THEN '1_expansion' ELSE '15_contraction' END
+-- FROM sale_order_log log
+-- JOIN last ON last.id = log.id
+-- WHERE last.recurring_monthly != log.recurring_monthly;
 
 -- Close contract with no active SO and empty MRR
 WITH last AS (
