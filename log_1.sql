@@ -81,6 +81,14 @@ WHERE order_id IN (
 );
 
 
+
+
+
+----- LIMIT TEST
+
+
+
+
 -- We correct ensure the first created log of each SO (except the first SO) is transfer 
 WITH SO as (
     SELECT id, date_order, origin_order_id, client_order_ref, 
