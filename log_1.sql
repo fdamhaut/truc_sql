@@ -34,6 +34,7 @@ WHERE event_type = '2_churn' AND id NOT IN (
     FROM sale_order_log
     ORDER BY origin_order_id, event_date DESC, event_type DESC
 );
+-- changer en order by ID ? 
 
 -- First log are changed into creation
 UPDATE sale_order_log
@@ -42,7 +43,6 @@ SET event_type = '0_creation',
     event_date = so.date_order
 FROM sale_order so
 WHERE so.id = sale_order_log.order_id
-AND so.state = 'cancel'
 AND sale_order_log.id IN (
     SELECT DISTINCT ON (origin_order_id) id
     FROM sale_order_log
@@ -57,7 +57,7 @@ WHERE id IN (
     SELECT log.id
     FROM sale_order_log log
     JOIN sale_order so ON so.id = log.order_id
-    WHERE event_date > '2023-04-12'
+    WHERE event_date >= '2023-04-13'
     AND so.subscription_state IN ('3_progress', '4_paused')
 );
 
@@ -68,8 +68,8 @@ WHERE id IN (
     SELECT log.id
     FROM sale_order_log log
     JOIN sale_order so ON so.id = log.order_id
-    WHERE event_date > '2023-04-12'
-    AND so.subscription_state IN ('6_churned', '5_renewed')
+    WHERE event_date >= '2023-04-13'
+    AND so.subscription_state IN ('6_churn', '5_renewed')
 );
 
 -- Remove log from cancelled SO
@@ -77,15 +77,61 @@ DELETE FROM sale_order_log
 WHERE order_id IN (
     SELECT id
     FROM sale_order so
-    WHERE state IN ('cancel', 'draft')
+    WHERE state IN ('cancel', 'draft', 'sent')
 );
 
 
+-- UPDATE sale_order
+-- SET subscription_state = NULL
+-- WHERE subscription_state is not NULL AND state = 'cancel';
 
+
+-- We add churned log to churned SO with no churn log
+WITH SO AS (
+    SELECT id, COALESCE(end_date, next_invoice_date) as end_date, origin_order_id, client_order_ref, 
+        currency_id, subscription_state, l.recurring_monthly as rm
+    from sale_order so
+    JOIN (
+        SELECT DISTINCT (order_id) order_id, recurring_monthly
+        FROM sale_order_log
+        ORDER BY order_id
+        ) l on l.order_id = so.id
+    where so.subscription_state = '6_churn'
+    and so.id not in (
+        SELECT order_id 
+        from sale_order_log
+        where event_type = '2_churn'
+    )
+)
+INSERT INTO sale_order_log (
+    order_id,
+    origin_order_id,
+    subscription_code,
+    event_date,
+    currency_id,
+    subscription_state,
+    recurring_monthly,
+    amount_signed,
+    amount_expansion,
+    amount_contraction,
+    event_type
+)
+SELECT 
+    SO.id, 
+    SO.origin_order_id,
+    SO.client_order_ref, 
+    LEAST(SO.end_date::date, '2022-04-12'),
+    SO.currency_id,
+    SO.subscription_state,
+    '0',
+    -SO.rm,
+    '0',
+    SO.rm,
+    '2_churn'
+FROM SO;
 
 
 ----- LIMIT TEST
-
 
 
 
@@ -150,10 +196,6 @@ AND order_id NOT IN (
     where event_type = '3_transfer'
     and recurring_monthly = 0
 );
-
--- Push event_date to ensure cohesion
-UPDATE sale_order_log log
-SET event_date = create_date::date;
 
 -- Merge multiple expansion/contraction log happening on the same day for the same SO (not contract)
 -- First SUM the added users
@@ -265,6 +307,9 @@ WHERE sale_order_log.event_type = '2_churn' AND sale_order_log.origin_order_id =
 -- FROM sale_order_log log
 -- JOIN last ON last.id = log.id
 -- WHERE last.recurring_monthly != log.recurring_monthly;
+
+
+
 
 -- Close contract with no active SO and empty MRR
 WITH last AS (
