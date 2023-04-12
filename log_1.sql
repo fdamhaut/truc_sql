@@ -2,7 +2,11 @@
 UPDATE sale_order_log
 SET recurring_monthly = amount_signed,
     amount_signed = recurring_monthly
-WHERE recurring_monthly < amount_signed AND amount_signed >= 0 AND recurring_monthly != 0;
+WHERE recurring_monthly < amount_signed 
+AND amount_signed = 0 
+AND event_type IN ('2_churn' , '3_transfer')
+AND create_date > '2022-09-06 14:20:41.120188' 
+AND create_date < '2023-02-08 10:42:52.359322';
 
 
 -- Push event_date to ensure cohesion
@@ -31,19 +35,49 @@ WHERE event_type = '2_churn' AND id NOT IN (
     ORDER BY origin_order_id, event_date DESC, event_type DESC
 );
 
--- Set the recurring monthly to 0 for the rest of the churn
-UPDATE sale_order_log
-SET recurring_monthly = amount_signed,
-    amount_signed = recurring_monthly
-WHERE event_type = '2_churn';
-
 -- First log are changed into creation
 UPDATE sale_order_log
-SET event_type = '0_creation'
-WHERE id IN (
+SET event_type = '0_creation',
+    amount_signed = sale_order_log.recurring_monthly,
+    event_date = so.date_order
+FROM sale_order so
+WHERE so.id = sale_order_log.order_id
+AND so.state = 'cancel'
+AND sale_order_log.id IN (
     SELECT DISTINCT ON (origin_order_id) id
     FROM sale_order_log
     ORDER BY origin_order_id, create_date, event_type, id
+)
+AND sale_order_log.order_id = sale_order_log.origin_order_id
+AND event_type != '0_creation';
+
+-- Delete future log for SO in progress/paused
+DELETE FROM sale_order_log
+WHERE id IN (
+    SELECT log.id
+    FROM sale_order_log log
+    JOIN sale_order so ON so.id = log.order_id
+    WHERE event_date > '2023-04-12'
+    AND so.subscription_state IN ('3_progress', '4_paused')
+);
+
+-- Bring back future log for SO churned/renewed
+UPDATE sale_order_log
+SET event_date = create_date::date
+WHERE id IN (
+    SELECT log.id
+    FROM sale_order_log log
+    JOIN sale_order so ON so.id = log.order_id
+    WHERE event_date > '2023-04-12'
+    AND so.subscription_state IN ('6_churned', '5_renewed')
+);
+
+-- Remove log from cancelled SO
+DELETE FROM sale_order_log
+WHERE order_id IN (
+    SELECT id
+    FROM sale_order so
+    WHERE state IN ('cancel', 'draft')
 );
 
 
