@@ -130,6 +130,15 @@ SELECT
     '2_churn'
 FROM SO;
 
+UPDATE sale_order_log
+SET event_type = '15_contraction'
+WHERE event_type = '2_churn'
+AND order_id IN (
+    SELECT id
+    FROM sale_order
+    WHERE subscription_state IN ('3_progress', '4_paused')
+);
+
 
 ----- LIMIT TEST
 
@@ -175,6 +184,7 @@ SELECT
     '3_transfer'
 FROM SO;
 
+
 -- And that the last log of each SO (except the last SO) is also a transfer
 UPDATE sale_order_log
 SET event_type = '3_transfer'
@@ -200,7 +210,7 @@ AND order_id NOT IN (
 -- Merge multiple expansion/contraction log happening on the same day for the same SO (not contract)
 -- First SUM the added users
 WITH sum AS (
-    SELECT order_id, event_date, COALESCE(referrer_id, -1) as referrer_id, SUM(COALESCE(new_enterprise_user, 0)) as user
+    SELECT order_id, event_date, COALESCE(referrer_id, -1) as referrer_id, SUM(COALESCE(new_enterprise_user, 0)) as user -----SUM MRR CHANGE ?
     FROM sale_order_log
     WHERE event_type IN ('1_expansion', '15_contraction')
     GROUP BY order_id, event_date, referrer_id
@@ -225,18 +235,18 @@ AND id NOT IN (
 );
 --END MERGE
 
--- Compute amount_signed based on recurring_monthly
-WITH new AS (
-    SELECT 
-        recurring_monthly - LAG(recurring_monthly) 
-        OVER (PARTITION BY origin_order_id, order_id ORDER BY create_date, event_date, event_type) AS as,
-        id
-    FROM sale_order_log
-)
-UPDATE sale_order_log
-SET amount_signed = COALESCE(new.as, recurring_monthly)
-FROM new 
-WHERE new.id = sale_order_log.id;
+-- -- Compute amount_signed based on recurring_monthly
+-- WITH new AS (
+--     SELECT 
+--         recurring_monthly - LAG(recurring_monthly) 
+--         OVER (PARTITION BY origin_order_id, order_id ORDER BY create_date, event_date, event_type) AS as,
+--         id
+--     FROM sale_order_log
+-- )
+-- UPDATE sale_order_log
+-- SET amount_signed = COALESCE(new.as, recurring_monthly)
+-- FROM new 
+-- WHERE new.id = sale_order_log.id;
 
 -- Delete empty log
 DELETE
@@ -258,18 +268,18 @@ SET amount_contraction = 0,
     event_type = '1_expansion'
 WHERE amount_signed > 0 AND event_type = '15_contraction';
 
--- Recompute end_date based on create_date
-WITH last AS (
-    SELECT origin_order_id,
-           MAX(event_date) AS date
-    FROM sale_order_log
-    WHERE event_type != '2_churn'
-    GROUP BY origin_order_id
-)
-UPDATE sale_order_log
-SET event_date = GREATEST(sale_order_log.create_date::date, last.date)
-FROM last
-WHERE sale_order_log.event_type = '2_churn' AND sale_order_log.origin_order_id = last.origin_order_id;
+-- -- Recompute end_date based on create_date
+-- WITH last AS (
+--     SELECT origin_order_id,
+--            MAX(event_date) AS date
+--     FROM sale_order_log
+--     WHERE event_type != '2_churn'
+--     GROUP BY origin_order_id
+-- )
+-- UPDATE sale_order_log
+-- SET event_date = GREATEST(sale_order_log.create_date::date, last.date)
+-- FROM last
+-- WHERE sale_order_log.event_type = '2_churn' AND sale_order_log.origin_order_id = last.origin_order_id;
 
 -- -- Reconcile based on SO
 -- WITH last AS (
@@ -311,38 +321,38 @@ WHERE sale_order_log.event_type = '2_churn' AND sale_order_log.origin_order_id =
 
 
 
--- Close contract with no active SO and empty MRR
-WITH last AS (
-    SELECT DISTINCT ON (origin_order_id) id
-    FROM sale_order_log
-    ORDER BY origin_order_id, order_id DESC, event_date DESC, event_type
-)
-INSERT INTO sale_order_log (
-    order_id,
-    origin_order_id,
-    subscription_code,
-    event_date,
-    currency_id,
-    subscription_state,
-    recurring_monthly,
-    amount_signed,
-    amount_expansion,
-    amount_contraction,
-    event_type
-)
-SELECT 
-    log.order_id, 
-    log.origin_order_id,
-    log.subscription_code, 
-    log.event_date,
-    log.currency_id,
-    '6_churn',
-    '0',
-    '0',
-    '0',
-    '0',
-    '2_churn'
-FROM sale_order_log log
-JOIN last ON last.id = log.id
-WHERE log.recurring_monthly = 0
-AND event_type IN ('1_expansion', '15_contraction');
+-- -- Close contract with no active SO and empty MRR
+-- WITH last AS (
+--     SELECT DISTINCT ON (origin_order_id) id
+--     FROM sale_order_log
+--     ORDER BY origin_order_id, order_id DESC, event_date DESC, event_type
+-- )
+-- INSERT INTO sale_order_log (
+--     order_id,
+--     origin_order_id,
+--     subscription_code,
+--     event_date,
+--     currency_id,
+--     subscription_state,
+--     recurring_monthly,
+--     amount_signed,
+--     amount_expansion,
+--     amount_contraction,
+--     event_type
+-- )
+-- SELECT 
+--     log.order_id, 
+--     log.origin_order_id,
+--     log.subscription_code, 
+--     log.event_date,
+--     log.currency_id,
+--     '6_churn',
+--     '0',
+--     '0',
+--     '0',
+--     '0',
+--     '2_churn'
+-- FROM sale_order_log log
+-- JOIN last ON last.id = log.id
+-- WHERE log.recurring_monthly = 0
+-- AND event_type IN ('1_expansion', '15_contraction');
