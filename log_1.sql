@@ -1,3 +1,8 @@
+BEGIN;
+TRUNCATE sale_order_log;
+
+INSERT INTO sale_order_log (SELECT * FROM sale_order_log_bcp);
+
 -- UPDATE sale_order
 -- SET subscription_state = NULL
 -- WHERE subscription_state is not NULL AND state = 'cancel';
@@ -20,15 +25,6 @@ AND event_type IN ('2_churn' , '3_transfer')
 AND create_date > '2022-09-06 14:20:41.120188' 
 AND create_date < '2023-02-08 10:42:52.359322';
 
--- Delete future log for SO in progress/paused
-DELETE FROM sale_order_log
-WHERE id IN (
-    SELECT log.id
-    FROM sale_order_log log
-    JOIN sale_order so ON so.id = log.order_id
-    WHERE event_date >= '2023-04-13'
-    AND so.subscription_state IN ('3_progress', '4_paused')
-);
 
 -- Creation that are not the first log are changed into expansion
 UPDATE sale_order_log
@@ -74,7 +70,7 @@ WHERE id IN (
     FROM sale_order_log log
     JOIN sale_order so ON so.id = log.order_id
     WHERE event_date >= '2023-04-13'
-    AND so.subscription_state IN ('6_churn', '5_renewed')
+    AND so.subscription_state IN ('6_churn', '5_renewed', '3_progress', '4_paused')
 );
 
 
@@ -90,7 +86,7 @@ WITH SO AS (
         ) l on l.order_id = so.id
     where so.subscription_state = '6_churn'
     and so.id not in (
-        SELECT order_id 
+        SELECT order_id
         from sale_order_log
         where event_type = '2_churn'
     )
@@ -130,3 +126,31 @@ AND order_id IN (
     FROM sale_order
     WHERE subscription_state IN ('3_progress', '4_paused')
 );
+
+
+-- Compute amount_signed if doesn't exist based on recurring_monthly
+WITH new AS (
+    SELECT 
+        recurring_monthly - LAG(recurring_monthly) 
+        OVER (PARTITION BY origin_order_id, order_id ORDER BY create_date, id) AS as,
+        id
+    FROM sale_order_log
+)
+UPDATE sale_order_log
+SET amount_signed = COALESCE(new.as, recurring_monthly)
+FROM new 
+WHERE new.id = sale_order_log.id AND amount_signed IS NULL;
+
+-- Recompute contraction and expansion value
+UPDATE log_bis
+SET amount_contraction = -amount_signed,
+    amount_expansion = 0,
+    event_type = '15_contraction'
+WHERE amount_signed < 0 AND event_type = '1_expansion';
+
+UPDATE log_bis
+SET amount_contraction = 0,
+    amount_expansion = amount_signed,
+    event_type = '1_expansion'
+WHERE amount_signed > 0 AND event_type = '15_contraction';
+
