@@ -6,7 +6,7 @@ import sys
 from collections import defaultdict
 
 
-conn = psycopg2.connect("dbname=trunk")
+conn = psycopg2.connect("dbname=openerp port=5431")
 cr = conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
 
 last_code = None
@@ -61,14 +61,19 @@ for order_id,logs in orders.items():
             logs[i+1]['recurring_monthly'] != (logs[i]['recurring_monthly'] + logs[i+1]['amount_signed']):
 
             cr.execute('''update sale_order_log
-                   set id = case id
-                                 when %s then %s
-                                 when %s then %s
-                                  end
-                    where id in %s
-                ''', (logs[i]['id'], logs[i+1]['id'], logs[i+1]['id'], logs[i]['id'], (logs[i]['id'], logs[i+1]['id'])))
-            (logs[i]['id'], logs[i+1]['id']) = (logs[i+1]['id'], logs[i]['id'])
-
+                set id = %s
+                where id = %s
+                ''', (0, logs[i]['id']))
+            cr.execute('''update sale_order_log
+                set id = %s
+                where id = %s
+                ''', (logs[i]['id'], logs[i+1]['id']))
+            cr.execute('''update sale_order_log
+                set id = %s
+                where id = %s
+                ''', (logs[i+1]['id'], logs[i]['id']))
+            
+            logs[i]['id'], logs[i+1]['id'] = logs[i+1]['id'], logs[i]['id']
             logs[i], logs[i+1] = logs[i+1], logs[i]
 
             print('Transfer and expansion to switch %s' % (logs[i]['id']))
@@ -79,6 +84,7 @@ for order_id,logs in orders.items():
         # last line before is not a transfer
         logs0 = orders[before]
 
+        ent_user = 0
         for i in range(len(logs0)):
             if logs0[i]['id'] > logs[0]['id']:
                 cr.execute('select sum(new_enterprise_user) from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
@@ -96,37 +102,90 @@ for order_id,logs in orders.items():
         logs0[i]['event_type'] = '3_transfer'
 
         cr.execute('''
-            update sale_order_log_bcp 
-            set amount_signed=%s, 
-                create_date=%s, 
-                recurring_monthly=%s, 
-                event_type=%s ,
-                new_enterprise_user=%s
-            where id=%s'''
-            , (-logs0[i-1]['recurring_monthly'], logs0[i]['create_date'], 0.00, '3_transfer', logs0[i]['new_enterprise_user'], logs0[i]['id']))
-        print('forcing last transfer')
+            UPDATE sale_order_log 
+            SET amount_signed = %s, 
+                create_date = %s, 
+                recurring_monthly = %s, 
+                event_type = %s,
+                new_enterprise_user = %s
+            WHERE id = %s'''
+            , (-logs0[i-1]['recurring_monthly'], 
+                logs0[i]['create_date'], 
+                0.00, 
+                '3_transfer',
+                logs0[i]['new_enterprise_user'], 
+                logs0[i]['id'])
+            )
 
+    # Reconcile Transfer
+    if before:
+        if len(logs) > 1 and logs[0]['event_type'] == '3_transfer'\
+           and logs[0]['create_date'] == logs[1]['create_date']:
 
-    if before and orders[before][-1]['event_type'] == '3_transfer':
-        if (len(logs)>1) and (logs[0]['event_type'] == '3_transfer') and (logs[0]['create_date'] == logs[1]['create_date']):
-            value = orders[before][-1]['amount_signed']
-            diff = logs[0]['recurring_monthly'] + value
-            logs[0]['amount_signed'] = logs[0]['recurring_monthly'] = -value
-            logs[1]['amount_signed'] += diff
-            event_type = logs[1]['amount_signed'] > 0 and '1_expansion' or '15_contraction'
-            logs[1]['event_type'] = event_type
-            cr.execute('update sale_order_log_bcp set amount_signed=%s, recurring_monthly=%s, event_type=%s where id=%s', (-value, -value, event_type, logs[0]['id']))
-            cr.execute('update sale_order_log_bcp set amount_signed=amount_signed+%s where id=%s', (diff, logs[1]['id']))
+            old_mrr = -orders[before][-1]['amount_signed']
+            diff = logs[0]['recurring_monthly'] - old_mrr
+            logs[0]['amount_signed'] = logs[0]['recurring_monthly'] = old_mrr
+            logs[1]['amount_signed'] = logs[1]['recurring_monthly'] - old_mrr
+            logs[1]['event_type'] = '1_expansion' if logs[1]['amount_signed'] >= 0 else '15_contraction'
+            orders[before][-1]['event_date'] = logs[0]['event_date']
+
+            cr.execute('''
+                UPDATE sale_order_log 
+                    set amount_signed = %s, 
+                        recurring_monthly = %s
+                    where id = %s''', 
+                (old_mrr, old_mrr, logs[0]['id']))
+            cr.execute('''
+                UPDATE sale_order_log 
+                    set amount_signed = %s,
+                        event_type = %s
+                    where id = %s''', 
+                (logs[1]['amount_signed'], logs[1]['event_type'], logs[1]['id']))
+            cr.execute('''
+                UPDATE sale_order_log 
+                    set event_date = %s
+                    where id = %s''', 
+                (orders[before][-1]['event_date'], orders[before][-1]['id']))
+
             print('fixing new transfer')
-        else:
-            # show_table(orders[before])
-            # show_table(logs)
-            print('Something to implement: insert an expansion, that will be ixed afrer')
-            # raise "Do something..."
+        elif len(logs) and logs[0]['event_type'] == '3_transfer':
+            old_mrr = - orders[before][-1]['amount_signed']
+            new_mrr = logs[0]['recurring_monthly']
+            cr.execute('''UPDATE sale_order_log 
+                    set amount_signed = %s, 
+                        recurring_monthly = %s
+                    where id = %s''', 
+                (old_mrr, old_mrr, logs[0]['id']))
+            orders[before][-1]['event_date'] = logs[0]['event_date']
+            cr.execute('''
+                UPDATE sale_order_log 
+                    set event_date = %s
+                    where id = %s''', 
+                (orders[before][-1]['event_date'], orders[before][-1]['id']))
+            if new_mrr != old_mrr:
+                # TODO insert MRR Change
+                l = logs[0]
+                cr.execute('''
+                INSERT INTO sale_order_log(
+                    order_id,
+                    origin_order_id,
+                    subscription_code,
+                    event_date,
+                    currency_id,
+                    subscription_state,
+                    recurring_monthly,
+                    amount_signed,
+                    amount_expansion,
+                    amount_contraction,
+                    event_type
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                (l['order_id'], l['origin_order_id'], l['subscription_code'], l['event_date'],
+                 l['currency_id'], '5_renewed', new_mrr, new_mrr - old_mrr, 0, new_mrr - old_mrr, '1_expansion'))
 
-for order_id,logs in orders.items():
-    show_table(logs)
+# for order_id,logs in orders.items():
+#     show_table(logs)
 
 
 
-conn.rollback()
+conn.commit()

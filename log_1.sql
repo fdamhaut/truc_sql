@@ -45,6 +45,16 @@ WHERE event_type = '2_churn' AND id NOT IN (
     WHERE event_type != '3_transfer'
     ORDER BY origin_order_id, event_date DESC, event_type DESC
 );
+
+UPDATE sale_order_log
+SET event_type = '15_contraction'
+WHERE event_type = '2_churn'
+AND order_id IN (
+    SELECT id
+    FROM sale_order
+    WHERE subscription_state IN ('3_progress', '4_paused', '5_renewed')
+);
+
 -- changer en order by ID ?
 
 -- First log are changed into creation
@@ -76,19 +86,21 @@ WHERE id IN (
 
 -- We add churned log to churned SO with no churn log
 WITH SO AS (
-    SELECT id, COALESCE(end_date, next_invoice_date) as end_date, origin_order_id, client_order_ref, 
+    SELECT so.id, COALESCE(end_date, next_invoice_date) as end_date, origin_order_id, client_order_ref, 
         currency_id, subscription_state, l.recurring_monthly as rm
     from sale_order so
     JOIN (
-        SELECT DISTINCT (order_id) order_id, recurring_monthly
+        SELECT DISTINCT ON (order_id) order_id, recurring_monthly, id
         FROM sale_order_log
-        ORDER BY order_id
+        ORDER BY order_id, id
         ) l on l.order_id = so.id
     where so.subscription_state = '6_churn'
+    and so.state in ('sale', 'done')
     and so.id not in (
         SELECT order_id
         from sale_order_log
         where event_type = '2_churn'
+        AND order_id IS NOT NULL
     )
 )
 INSERT INTO sale_order_log (
@@ -117,16 +129,6 @@ SELECT
     SO.rm,
     '2_churn'
 FROM SO;
-
-UPDATE sale_order_log
-SET event_type = '15_contraction'
-WHERE event_type = '2_churn'
-AND order_id IN (
-    SELECT id
-    FROM sale_order
-    WHERE subscription_state IN ('3_progress', '4_paused')
-);
-
 
 -- Compute amount_signed if doesn't exist based on recurring_monthly
 WITH new AS (
