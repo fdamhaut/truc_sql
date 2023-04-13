@@ -36,9 +36,7 @@ codes = ('M21043025842286','M22011035087550', 'M22070141784236', 'M2110183176918
 cr.execute('''
     select * 
     from sale_order_log 
-    where subscription_code in %s 
-    order by subscription_code, id''', 
-(codes,))
+    order by subscription_code, id''')
 
 logs = cr.fetchall()
 
@@ -56,14 +54,15 @@ for order_id,logs in orders.items():
     # If there is a transfer and expansion in same transaction: we might need to merge them
     for i in range(1, len(logs)-1):
         if logs[i]['create_date'] == logs[i+1]['create_date'] and \
-            logs[i]['event_type'] == '3_transfer' and \
+            logs[i]['event_type'] == '3_transfer' and 
+            logs[i]['recurring_monthly'] == 0 and\
             logs[i+1]['event_type'] in ('1_expansion', '15_contraction') and \
             logs[i+1]['recurring_monthly'] != (logs[i]['recurring_monthly'] + logs[i+1]['amount_signed']):
 
             cr.execute('''update sale_order_log
                 set id = %s
                 where id = %s
-                ''', (0, logs[i]['id']))
+                ''', (-1, logs[i]['id']))
             cr.execute('''update sale_order_log
                 set id = %s
                 where id = %s
@@ -71,7 +70,7 @@ for order_id,logs in orders.items():
             cr.execute('''update sale_order_log
                 set id = %s
                 where id = %s
-                ''', (logs[i+1]['id'], logs[i]['id']))
+                ''', (logs[i+1]['id'], -1))
             
             logs[i]['id'], logs[i+1]['id'] = logs[i+1]['id'], logs[i]['id']
             logs[i], logs[i+1] = logs[i+1], logs[i]
@@ -87,8 +86,8 @@ for order_id,logs in orders.items():
         ent_user = 0
         for i in range(len(logs0)):
             if logs0[i]['id'] > logs[0]['id']:
-                cr.execute('select sum(new_enterprise_user) from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
-                ent_user = cr.fetchall()[0]
+                cr.execute('select sum(coalesce(new_enterprise_user, 0)) as sum from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
+                ent_user = cr.fetchall()[0]['sum'] or 0
                 cr.execute('delete from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
                 while len(logs0) > i+1:
                     del logs0[i+1]
@@ -98,7 +97,7 @@ for order_id,logs in orders.items():
         logs0[i]['create_date'] = logs[0]['create_date']
         logs0[i]['amount_signed'] = -logs0[i-1]['recurring_monthly']
         logs0[i]['recurring_monthly'] = 0.00
-        logs0[i]['new_enterprise_user'] = logs0[i]['new_enterprise_user'] + ent_user
+        logs0[i]['new_enterprise_user'] = (logs0[i]['new_enterprise_user'] or 0) + ent_user
         logs0[i]['event_type'] = '3_transfer'
 
         cr.execute('''
@@ -145,7 +144,7 @@ for order_id,logs in orders.items():
                 UPDATE sale_order_log 
                     set event_date = %s
                     where id = %s''', 
-                (orders[before][-1]['event_date'], orders[before][-1]['id']))
+                (logs[0]['event_date'], orders[before][-1]['id']))
 
             print('fixing new transfer')
         elif len(logs) and logs[0]['event_type'] == '3_transfer':
@@ -161,7 +160,7 @@ for order_id,logs in orders.items():
                 UPDATE sale_order_log 
                     set event_date = %s
                     where id = %s''', 
-                (orders[before][-1]['event_date'], orders[before][-1]['id']))
+                (logs[0]['event_date'], orders[before][-1]['id']))
             if new_mrr != old_mrr:
                 # TODO insert MRR Change
                 l = logs[0]
@@ -179,7 +178,7 @@ for order_id,logs in orders.items():
                     amount_contraction,
                     event_type
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
                 (l['order_id'], l['origin_order_id'], l['subscription_code'], l['event_date'],
                  l['currency_id'], '5_renewed', new_mrr, new_mrr - old_mrr, 0, new_mrr - old_mrr, '1_expansion'))
 

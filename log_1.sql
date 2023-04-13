@@ -7,6 +7,19 @@ INSERT INTO sale_order_log (SELECT * FROM sale_order_log_bcp);
 -- SET subscription_state = NULL
 -- WHERE subscription_state is not NULL AND state = 'cancel';
 
+UPDATE sale_order
+SET state = 'cancel'
+WHERE order_id IN (
+    SELECT id
+    FROM sale_order so 
+    WHERE so.subscription_state = '5_renewed'
+    AND id NOT IN (
+        SELECT DISTINCT subscription_id
+        FROM sale_order
+        WHERE subscription_id IS NOT NULL
+    )
+);
+
 -- Remove log from cancelled SO
 DELETE FROM sale_order_log
 WHERE order_id IN (
@@ -94,7 +107,7 @@ WITH SO AS (
         FROM sale_order_log
         ORDER BY order_id, id
         ) l on l.order_id = so.id
-    where so.subscription_state = '6_churn'
+    where ( so.subscription_state = '6_churn'
     and so.state in ('sale', 'done')
     and so.id not in (
         SELECT order_id
