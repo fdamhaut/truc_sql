@@ -12,20 +12,21 @@ UPDATE sale_order
 SET subscription_state = NULL
 WHERE subscription_state is not NULL AND state = 'cancel';
 
--- UPDATE sale_order
--- SET state = 'cancel'
--- WHERE id IN (
---     SELECT id
---     FROM sale_order so 
---     WHERE so.subscription_state = '5_renewed'
---     AND id NOT IN (
---         SELECT DISTINCT subscription_id
---         FROM sale_order
---         WHERE subscription_id IS NOT NULL
---     )
--- );
+-- Change renewed with no child to churned M22112156233162, M22112156233162, M22112156233162, M22112156233162
+UPDATE sale_order 
+SET subscription_state = '6_churn'
+WHERE id IN (
+    SELECT id
+    FROM sale_order so 
+    WHERE so.subscription_state = '5_renewed'
+    AND id NOT IN (
+        SELECT DISTINCT subscription_id
+        FROM sale_order
+        WHERE subscription_id IS NOT NULL
+    )
+);
 
--- Remove log from cancelled SO
+-- Remove log from cancelled SO M1811038904534 M23011767584878 M1809248620518 M1808078312543
 DELETE FROM sale_order_log
 WHERE order_id IN (
     SELECT id
@@ -33,7 +34,7 @@ WHERE order_id IN (
     WHERE state IN ('cancel', 'draft', 'sent')
 );
 
--- Correct Error from 8a8080ed4f75c811cf0e92065a86f4723a4aaced
+-- Correct Error from 8a8080ed4f75c811cf0e92065a86f4723a4aaced M21092030723035 M21092030731668 M21082429835776
 UPDATE sale_order_log
 SET recurring_monthly = amount_signed,
     amount_signed = recurring_monthly
@@ -71,7 +72,7 @@ WHERE event_type = '2_churn'
 AND order_id IN (
     SELECT id
     FROM sale_order
-    WHERE subscription_state IN ('3_progress', '4_paused', '5_renewed')
+    WHERE subscription_state IN ('3_progress', '4_paused')
 );
 
 -- changer en order by ID ?
@@ -161,6 +162,9 @@ UPDATE sale_order_log
 SET amount_signed = COALESCE(new.as, recurring_monthly)
 FROM new 
 WHERE new.id = sale_order_log.id AND amount_signed IS NULL;
+
+
+
 
 -- Recompute contraction and expansion value
 UPDATE log_bis
