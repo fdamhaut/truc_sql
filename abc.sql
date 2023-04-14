@@ -1,3 +1,28 @@
+-- Compute amount_signed if doesn't exist based on recurring_monthly
+WITH new AS (
+    SELECT 
+        recurring_monthly - LAG(recurring_monthly) 
+        OVER (PARTITION BY origin_order_id, order_id ORDER BY create_date, id) AS as,
+        id
+    FROM sale_order_log
+)
+UPDATE sale_order_log
+SET amount_signed = COALESCE(new.as, recurring_monthly)
+FROM new 
+WHERE new.id = sale_order_log.id AND amount_signed IS NULL;
+
+-- Recompute contraction and expansion value
+UPDATE log_bis
+SET amount_contraction = -amount_signed,
+    amount_expansion = 0,
+    event_type = '15_contraction'
+WHERE amount_signed < 0 AND event_type = '1_expansion';
+
+UPDATE log_bis
+SET amount_contraction = 0,
+    amount_expansion = amount_signed,
+    event_type = '1_expansion'
+WHERE amount_signed > 0 AND event_type = '15_contraction';
 
 
 DELETE
@@ -263,3 +288,51 @@ WHERE amount_signed > 0 AND event_type = '15_contraction';
 -- JOIN last ON last.id = log.id
 -- WHERE log.recurring_monthly = 0
 -- AND event_type IN ('1_expansion', '15_contraction');
+
+
+
+UPDATE sale_order
+SET state = 'done'
+WHERE id IN (
+    SELECT id, client_order_ref
+    FROM sale_order_bcp so 
+    WHERE so.subscription_state = '5_renewed'
+    AND id NOT IN (
+        SELECT DISTINCT subscription_id
+        FROM sale_order_bcp
+        WHERE subscription_id IS NOT NULL
+    )
+);
+
+
+WITH origin AS (
+    SELECT COALESCE(origin_order_id, id) as id, client_order_ref as subscription_code
+    FROM sale_order
+    WHERE subscription_state IN ('3_progress', '4_paused')
+),
+log AS (
+    SELECT origin_order_id as id, subscription_code
+    FROM sale_order_log
+    WHERE event_type = '0_creation'
+    AND origin_order_id NOT IN (
+        SELECT origin_order_id
+        FROM sale_order_log
+        WHERE event_type = '2_churn'
+    )
+)
+SELECT id, subscription_code
+FROM log
+WHERE id NOT IN (
+    SELECT id
+    FROM origin
+);
+
+
+SELECT origin_order_id
+FROM (
+    SELECT origin_order_id, count(*) as c
+    FROM sale_order_log
+    WHERE event_type = '0_creation'
+    GROUP BY origin_order_id
+) i
+where c > 1;

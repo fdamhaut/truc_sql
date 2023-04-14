@@ -79,7 +79,7 @@ for order_id,logs in orders.items():
 
     # Try to match transfers of new orders
     before = prec_order.get(logs[0]['order_id'], None)
-    if before and orders[before][-1]['event_type'] != '3_transfer':
+    if before:
         # last line before is not a transfer
         logs0 = orders[before]
 
@@ -89,8 +89,7 @@ for order_id,logs in orders.items():
                 cr.execute('select sum(coalesce(new_enterprise_user, 0)) as sum from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
                 ent_user = cr.fetchall()[0]['sum'] or 0
                 cr.execute('delete from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
-                while len(logs0) > i+1:
-                    del logs0[i+1]
+                del logs0[i+1:]
                 break
 
         # Add condition to avoid useless execute
@@ -116,8 +115,7 @@ for order_id,logs in orders.items():
                 logs0[i]['id'])
             )
 
-    # Reconcile Transfer
-    if before:
+        # Reconcile Transfer
         if len(logs) > 1 and logs[0]['event_type'] == '3_transfer' and\
             logs[0]['currency_id'] == orders[before][-1]['currency_id']:
 
@@ -147,10 +145,13 @@ for order_id,logs in orders.items():
                 (logs[0]['event_date'], orders[before][-1]['id']))
 
             print('fixing new transfer')
+
         elif len(logs) and logs[0]['event_type'] == '3_transfer' and\
             logs[0]['currency_id'] == orders[before][-1]['currency_id']:
+
             old_mrr = - orders[before][-1]['amount_signed']
             new_mrr = logs[0]['recurring_monthly']
+
             cr.execute('''UPDATE sale_order_log 
                     set amount_signed = %s, 
                         recurring_monthly = %s
@@ -162,6 +163,7 @@ for order_id,logs in orders.items():
                     set event_date = %s
                     where id = %s''', 
                 (logs[0]['event_date'], orders[before][-1]['id']))
+
             if new_mrr != old_mrr:
                 # TODO insert MRR Change
                 l = logs[0]
@@ -183,9 +185,9 @@ for order_id,logs in orders.items():
                 (l['order_id'], l['origin_order_id'], l['subscription_code'], l['event_date'],
                  l['currency_id'], '5_renewed', new_mrr, new_mrr - old_mrr, 0, new_mrr - old_mrr, '1_expansion'))
 
+
 # for order_id,logs in orders.items():
 #     show_table(logs)
-
 
 
 conn.commit()

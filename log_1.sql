@@ -45,8 +45,7 @@ AND create_date < '2023-02-08 10:42:52.359322';
 --AND recurring_monthly < amount_signed 
 
 
-
--- Creation that are not the first log are changed into expansion
+-- Creation that are not the first log are changed into expansion M22031437539225 M22092345498172 M20053016649499 M20111620889854
 UPDATE sale_order_log
 SET event_type = '1_expansion'
 WHERE event_type = '0_creation'
@@ -56,7 +55,7 @@ AND id NOT IN (
     ORDER BY origin_order_id, create_date, event_type
 );
 
--- Churn that are not the last log are changed into contraction
+-- Churn that are not the last log are changed into contraction M22072142742208 M19103012676864 M20120421642477 M22070942264774
 UPDATE sale_order_log
 SET event_type = '15_contraction'
 WHERE event_type = '2_churn' AND id NOT IN (
@@ -66,6 +65,7 @@ WHERE event_type = '2_churn' AND id NOT IN (
     ORDER BY origin_order_id, event_date DESC, event_type DESC
 );
 
+-- Churn un progress are removed M22041138671603 M22111755165774 M19072711872346
 UPDATE sale_order_log
 SET event_type = '15_contraction'
 WHERE event_type = '2_churn'
@@ -77,7 +77,7 @@ AND order_id IN (
 
 -- changer en order by ID ?
 
--- First log are changed into creation
+-- First log are changed into creation M20042716041309 M1811068925874 M1712306167873 M1705103964518
 UPDATE sale_order_log
 SET event_type = '0_creation',
     amount_signed = sale_order_log.recurring_monthly,
@@ -92,7 +92,7 @@ AND sale_order_log.id IN (
 AND sale_order_log.order_id = sale_order_log.origin_order_id
 AND event_type != '0_creation';
 
--- Bring back future log for SO churned/renewed
+-- Bring back future log for SO churned/renewed M21113033509360 M160425787283 M21062827904700 M21061527464805
 UPDATE sale_order_log
 SET event_date = create_date::date
 WHERE id IN (
@@ -104,7 +104,7 @@ WHERE id IN (
 );
 
 
--- We add churned log to churned SO with no churn log
+-- We add churned log to churned SO with no churn log M20092219749813 M1608031437668 M140703666487
 WITH SO AS (
     SELECT so.id, COALESCE(end_date, next_invoice_date) as end_date, origin_order_id, client_order_ref, 
         currency_id, subscription_state, l.recurring_monthly as rm
@@ -162,9 +162,6 @@ UPDATE sale_order_log
 SET amount_signed = COALESCE(new.as, recurring_monthly)
 FROM new 
 WHERE new.id = sale_order_log.id AND amount_signed IS NULL;
-
-
-
 
 -- Recompute contraction and expansion value
 UPDATE log_bis
