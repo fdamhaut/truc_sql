@@ -6,7 +6,7 @@ import sys
 from collections import defaultdict
 
 
-conn = psycopg2.connect("dbname=openerp port=5431")
+conn = psycopg2.connect("dbname=openerp")
 cr = conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
 
 last_code = None
