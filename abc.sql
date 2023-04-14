@@ -336,3 +336,42 @@ FROM (
     GROUP BY origin_order_id
 ) i
 where c > 1;
+
+
+
+-- Compute amount_signed if doesn't exist based on recurring_monthly
+WITH new AS (
+    SELECT 
+        recurring_monthly - LAG(recurring_monthly) 
+        OVER (PARTITION BY origin_order_id, order_id ORDER BY create_date, id) AS as,
+        id
+    FROM sale_order_log
+)
+UPDATE sale_order_log
+SET amount_signed = COALESCE(new.as, recurring_monthly)
+FROM new 
+WHERE new.id = sale_order_log.id 
+AND event_type != '3_transfer'
+AND amount_signed != COALESCE(new.as, recurring_monthly);
+
+WITH new AS (
+    SELECT 
+        recurring_monthly - LAG(recurring_monthly) 
+        OVER (PARTITION BY origin_order_id, order_id ORDER BY create_date, id) AS as,
+        id
+    FROM sale_order_log
+)
+SELECT SUM (amount_signed - COALESCE(new.as, recurring_monthly))
+FROM sale_order_log
+JOIN new ON new.id = sale_order_log.id 
+WHERE amount_signed != COALESCE(new.as, recurring_monthly);
+
+
+SELECT origin_order_id
+FROM (
+    SELECT origin_order_id, sum(amount_signed)
+    FROM sale_order_log
+    WHERE event_type = '3_transfer'
+    GROUP BY origin_order_id
+)
+WHERE sum != 0;

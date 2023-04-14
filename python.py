@@ -25,7 +25,8 @@ def show_table(logs, error='All right'):
 
 
 orders = defaultdict(list)
-code = defaultdict(list)
+order_per_origin = defaultdict(list)
+has_next = set()
 
 # ('M21043025842286','M22011035087550', 'M22070141784236', 'M21101831769180', 'M21043025842286', 'M1701132758517')
 codes = ('M21043025842286','M22011035087550', 'M22070141784236', 'M21101831769180', 'M21043025842286', 'M1701132758517')
@@ -40,13 +41,17 @@ cr.execute('''
 
 logs = cr.fetchall()
 
+
 prec_order = {}
 for log in logs:
     order_id = log['order_id']
-    if not len(orders[order_id]) and len(code[log['ooid']]):
-        prec_order[order_id] = code[log['ooid']][-1]
+    origin = log['ooid']
+    if order_id not in orders:
+        if origin in order_per_origin:
+            prec_order[order_id] = order_per_origin[origin][-1]
+            has_next.add(order_per_origin[origin][-1])
+        order_per_origin[origin].append(order_id)
     orders[order_id].append(log)
-    code[log['ooid']].append(order_id)
 
 
 for order_id,logs in orders.items():
@@ -75,8 +80,6 @@ for order_id,logs in orders.items():
             logs[i]['id'], logs[i+1]['id'] = logs[i+1]['id'], logs[i]['id']
             logs[i], logs[i+1] = logs[i+1], logs[i]
 
-            print('Transfer and expansion to switch %s' % (logs[i]['id']))
-
     # Try to match transfers of new orders
     before = prec_order.get(logs[0]['order_id'], None)
     if before:
@@ -85,24 +88,51 @@ for order_id,logs in orders.items():
 
         ent_user = 0
         for i in range(len(logs0)):
-            if logs0[i]['id'] > logs[0]['id']:
-                cr.execute('select sum(coalesce(new_enterprise_user, 0)) as sum from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
+            if logs0[i]['create_date'] > logs[0]['create_date']:
+                cr.execute('SELECT sum(coalesce(new_enterprise_user, 0)) as sum from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
                 ent_user = cr.fetchall()[0]['sum'] or 0
-                cr.execute('delete from sale_order_log where id > %s and order_id = %s', (logs[0]['id'], before))
+                f_trch = {}
+                if logs0[i-1]['event_type'] not in ('3_transfer', '2_churn'):
+                    for l in logs0[i:]:
+                        if l['event_type'] in ('3_transfer', '2_churn'):
+                            f_trch = l
                 del logs0[i:]
+                if f_trch:
+                    logs0 += [f_trch]
+                cr.execute('DELETE from sale_order_log where create_date > %s and order_id = %s and id != %s',
+                     (logs[0]['create_date'], before, f_trch.get('id', -1)))
                 break
-        i = i-1
+
+        if logs[0]['event_type'] not in ('3_transfer', '0_creation'):
+            l = logs[0]
+            event_type = '0_creation' if logs0[-1]['event_type'] == '2_churn' else '3_transfer'
+            mrr = -logs0[-1]['amount_signed']
+            cr.execute('''
+                INSERT INTO sale_order_log(
+                    order_id,
+                    origin_order_id,
+                    subscription_code,
+                    event_date,
+                    currency_id,
+                    subscription_state,
+                    recurring_monthly,
+                    amount_signed,
+                    amount_expansion,
+                    amount_contraction,
+                    event_type
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                (l['order_id'], l['ooid'], l['subscription_code'], l['event_date'],
+                 l['currency_id'], '3_progress', mrr, mrr, 0, mrr, event_type))
+
+
 
         # Add condition to avoid useless execute
-        logs0[i]['create_date'] = logs[0]['create_date']
-        logs0[i]['amount_signed'] = -logs0[i-1]['recurring_monthly'] if i > 0 else 0
-        logs0[i]['recurring_monthly'] = 0.00
-        logs0[i]['new_enterprise_user'] = (logs0[i]['new_enterprise_user'] or 0) + ent_user
-<<<<<<< HEAD
-        logs0[i]['event_type'] = '0_creation' if logs0[-1]['event_type'] == '2_churn' else '3_transfer'
-=======
-        logs0[i]['event_type'] = '2_churn' if logs[0][0]['event_type']=='0_creation' else '3_transfer'
->>>>>>> 9d6881f90dc0f9e3a8e38677736a5a560f942553
+        logs0[-1]['create_date'] = logs[0]['create_date']
+        logs0[-1]['amount_signed'] = -logs0[-2]['recurring_monthly'] if len(logs0) > 1 else 0
+        logs0[-1]['recurring_monthly'] = 0.00
+        logs0[-1]['new_enterprise_user'] = (logs0[-1]['new_enterprise_user'] or 0) + ent_user
+        logs0[-1]['event_type'] = '2_churn' if logs[0]['event_type'] == '0_creation' else '3_transfer'
 
         cr.execute('''
             UPDATE sale_order_log 
@@ -112,12 +142,12 @@ for order_id,logs in orders.items():
                 event_type = %s,
                 new_enterprise_user = %s
             WHERE id = %s'''
-            , (logs0[i]['amount_signed'], 
-                logs0[i]['create_date'], 
+            , (logs0[-1]['amount_signed'], 
+                logs0[-1]['create_date'], 
                 0.00, 
-                logs0[i]['event_type'],
-                logs0[i]['new_enterprise_user'], 
-                logs0[i]['id'])
+                logs0[-1]['event_type'],
+                logs0[-1]['new_enterprise_user'], 
+                logs0[-1]['id'])
             )
 
         # Reconcile Transfer
@@ -148,8 +178,6 @@ for order_id,logs in orders.items():
                     set event_date = %s
                     where id = %s''', 
                 (logs[0]['event_date'], orders[before][-1]['id']))
-
-            print('fixing new transfer')
 
         elif len(logs) and logs[0]['event_type'] == '3_transfer' and\
             logs[0]['currency_id'] == orders[before][-1]['currency_id']:
@@ -190,9 +218,16 @@ for order_id,logs in orders.items():
                 (l['order_id'], l['origin_order_id'], l['subscription_code'], l['event_date'],
                  l['currency_id'], '5_renewed', new_mrr, new_mrr - old_mrr, 0, new_mrr - old_mrr, '1_expansion'))
 
+for order_id,logs in orders.items():
 
-# for order_id,logs in orders.items():
-#     show_table(logs)
+    new = sum(map(lambda s:s['event_type'] == '0_creation', logs))
+    chu = sum(map(lambda s:s['event_type'] == '2_churn', logs))
+    tr = sum(map(lambda s:s['event_type'] == '3_transfer', logs))
+
+    if new > 1 or chu > 1 or new+chu+tr > 2 or (order_id in has_next and new+chu+tr != 2):
+        show_table(logs)
+        print(f'Error in {order_id} : {new}, {chu}, {tr}')
+        assert 0 == 1
 
 
 conn.commit()
