@@ -8,23 +8,23 @@ INSERT INTO sale_order_log (SELECT * FROM sale_order_log_bcp);
 -- INSERT INTO sale_order (SELECT * FROM sale_order_bcp);
 
 
-UPDATE sale_order
-SET subscription_state = NULL
-WHERE subscription_state is not NULL AND state = 'cancel';
+-- UPDATE sale_order
+-- SET subscription_state = NULL
+-- WHERE subscription_state is not NULL AND state = 'cancel';
 
--- Change renewed with no child to churned M22112156233162, M22112156233162, M22112156233162, M22112156233162
-UPDATE sale_order 
-SET subscription_state = '6_churn'
-WHERE id IN (
-    SELECT id
-    FROM sale_order so 
-    WHERE so.subscription_state = '5_renewed'
-    AND id NOT IN (
-        SELECT DISTINCT subscription_id
-        FROM sale_order
-        WHERE subscription_id IS NOT NULL
-    )
-);
+-- -- Change renewed with no child to churned M22112156233162, M22112156233162, M22112156233162, M22112156233162
+-- UPDATE sale_order 
+-- SET subscription_state = '6_churn'
+-- WHERE id IN (
+--     SELECT id
+--     FROM sale_order so 
+--     WHERE so.subscription_state = '5_renewed'
+--     AND id NOT IN (
+--         SELECT DISTINCT subscription_id
+--         FROM sale_order
+--         WHERE subscription_id IS NOT NULL
+--     )
+-- );
 
 -- Remove log from cancelled SO M1811038904534 M23011767584878 M1809248620518 M1808078312543
 DELETE FROM sale_order_log
@@ -59,10 +59,9 @@ AND id NOT IN (
 UPDATE sale_order_log
 SET event_type = '15_contraction'
 WHERE event_type = '2_churn' AND id NOT IN (
-    SELECT DISTINCT ON (origin_order_id) id
+    SELECT DISTINCT ON (order_id) id
     FROM sale_order_log
-    WHERE event_type != '3_transfer'
-    ORDER BY origin_order_id, event_date DESC, event_type DESC
+    ORDER BY order_id, create_date DESC, event_type DESC
 );
 
 -- Churn un progress are removed M22041138671603 M22111755165774 M19072711872346
