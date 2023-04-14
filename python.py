@@ -79,7 +79,7 @@ for order_id,logs in orders.items():
 
     # Try to match transfers of new orders
     before = prec_order.get(logs[0]['order_id'], None)
-    if before and orders[before][-1]['event_type'] != '3_transfer':
+    if before:
         # last line before is not a transfer
         logs0 = orders[before]
 
@@ -88,10 +88,10 @@ for order_id,logs in orders.items():
             if logs0[i]['id'] > logs[0]['id']:
                 cr.execute('select sum(coalesce(new_enterprise_user, 0)) as sum from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
                 ent_user = cr.fetchall()[0]['sum'] or 0
-                cr.execute('delete from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
-                while len(logs0) > i+1:
-                    del logs0[i+1]
+                cr.execute('delete from sale_order_log where id > %s and order_id = %s', (logs[0]['id'], before))
+                del logs0[i:]
                 break
+        i = i-1
 
         # Add condition to avoid useless execute
         logs0[i]['create_date'] = logs[0]['create_date']
