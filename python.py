@@ -98,11 +98,7 @@ for order_id,logs in orders.items():
         logs0[i]['amount_signed'] = -logs0[i-1]['recurring_monthly'] if i > 0 else 0
         logs0[i]['recurring_monthly'] = 0.00
         logs0[i]['new_enterprise_user'] = (logs0[i]['new_enterprise_user'] or 0) + ent_user
-<<<<<<< HEAD
-        logs0[i]['event_type'] = '0_creation' if logs0[-1]['event_type'] == '2_churn' else '3_transfer'
-=======
         logs0[i]['event_type'] = '2_churn' if logs[0][0]['event_type']=='0_creation' else '3_transfer'
->>>>>>> 9d6881f90dc0f9e3a8e38677736a5a560f942553
 
         cr.execute('''
             UPDATE sale_order_log 
