@@ -54,6 +54,7 @@ for log in logs:
     orders[order_id].append(log)
 
 
+# Fix Transfer
 for order_id,logs in orders.items():
 
     # If there is a transfer and expansion in same transaction: we might need to merge them
@@ -128,19 +129,11 @@ for order_id,logs in orders.items():
 
 
         # Add condition to avoid useless execute
-<<<<<<< HEAD
         logs0[-1]['create_date'] = logs[0]['create_date']
         logs0[-1]['amount_signed'] = -logs0[-2]['recurring_monthly'] if len(logs0) > 1 else 0
         logs0[-1]['recurring_monthly'] = 0.00
         logs0[-1]['new_enterprise_user'] = (logs0[-1]['new_enterprise_user'] or 0) + ent_user
         logs0[-1]['event_type'] = '2_churn' if logs[0]['event_type'] == '0_creation' else '3_transfer'
-=======
-        logs0[i]['create_date'] = logs[0]['create_date']
-        logs0[i]['amount_signed'] = -logs0[i-1]['recurring_monthly'] if i > 0 else 0
-        logs0[i]['recurring_monthly'] = 0.00
-        logs0[i]['new_enterprise_user'] = (logs0[i]['new_enterprise_user'] or 0) + ent_user
-        logs0[i]['event_type'] = '2_churn' if logs[0][0]['event_type']=='0_creation' else '3_transfer'
->>>>>>> d0e23bac065a437c884c6b0f1ca557c0ed1d13bf
 
         cr.execute('''
             UPDATE sale_order_log 
@@ -226,15 +219,66 @@ for order_id,logs in orders.items():
                 (l['order_id'], l['origin_order_id'], l['subscription_code'], l['event_date'],
                  l['currency_id'], '5_renewed', new_mrr, new_mrr - old_mrr, 0, new_mrr - old_mrr, '1_expansion'))
 
-for order_id,logs in orders.items():
+print('Between Done')
 
+# Fix SO 
+for order_id,logs in orders.items():
+    # Fix number of transfer
+    sp = sum(map(lambda s:s['event_type'] in ('0_creation', '2_churn'), logs))
+    ltr = []
+    ltr_id = []
+    for n, l in enumerate(logs):
+        if l['event_type'] == '3_transfer':
+            ltr += [n]
+            ltr_id += [l['id']]
+
+    if order_id in has_next:
+        end = -2+sp
+    else:
+        end = -1+sp
+    if end < 0:
+        ltr = ltr[:end]
+        ltr_id = ltr_id[:end]
+    if ltr:
+        cr.execute('DELETE from sale_order_log where id in %s', (tuple(ltr_id),))
+        for n in reversed(ltr):
+            del logs[n]
+
+print('IN Done')
+
+
+orders = defaultdict(list)
+order_per_origin = defaultdict(list)
+has_next = set()
+
+cr.execute('''
+    select *, coalesce(origin_order_id, order_id) as ooid
+    from sale_order_log 
+    order by coalesce(origin_order_id, order_id), id''')
+
+logs = cr.fetchall()
+
+
+prec_order = {}
+for log in logs:
+    order_id = log['order_id']
+    origin = log['ooid']
+    if order_id not in orders:
+        if origin in order_per_origin:
+            prec_order[order_id] = order_per_origin[origin][-1]
+            has_next.add(order_per_origin[origin][-1])
+        order_per_origin[origin].append(order_id)
+    orders[order_id].append(log)
+
+
+for order_id,logs in orders.items(): 
     new = sum(map(lambda s:s['event_type'] == '0_creation', logs))
     chu = sum(map(lambda s:s['event_type'] == '2_churn', logs))
     tr = sum(map(lambda s:s['event_type'] == '3_transfer', logs))
 
     if new > 1 or chu > 1 or new+chu+tr > 2 or (order_id in has_next and new+chu+tr != 2):
         show_table(logs)
-        print(f'Error in {order_id} : {new}, {chu}, {tr}')
+        print(f'Error in {order_id} : Wrong number of special {new}, {chu}, {tr}')
         assert 0 == 1
 
 
