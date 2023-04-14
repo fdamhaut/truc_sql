@@ -95,7 +95,7 @@ for order_id,logs in orders.items():
 
         # Add condition to avoid useless execute
         logs0[i]['create_date'] = logs[0]['create_date']
-        logs0[i]['amount_signed'] = -logs0[i-1]['recurring_monthly']
+        logs0[i]['amount_signed'] = -logs0[i-1]['recurring_monthly'] if i > 0 else 0
         logs0[i]['recurring_monthly'] = 0.00
         logs0[i]['new_enterprise_user'] = (logs0[i]['new_enterprise_user'] or 0) + ent_user
         logs0[i]['event_type'] = '3_transfer'
@@ -108,7 +108,7 @@ for order_id,logs in orders.items():
                 event_type = %s,
                 new_enterprise_user = %s
             WHERE id = %s'''
-            , (-logs0[i-1]['recurring_monthly'], 
+            , (logs0[i]['amount_signed'], 
                 logs0[i]['create_date'], 
                 0.00, 
                 '3_transfer',
