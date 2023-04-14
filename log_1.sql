@@ -50,9 +50,9 @@ UPDATE sale_order_log
 SET event_type = '1_expansion'
 WHERE event_type = '0_creation'
 AND id NOT IN (
-    SELECT DISTINCT ON (origin_order_id) id
+    SELECT DISTINCT ON (order_id) id
     FROM sale_order_log
-    ORDER BY origin_order_id, create_date, event_type
+    ORDER BY order_id, create_date, event_type
 );
 
 -- Churn that are not the last log are changed into contraction M22072142742208 M19103012676864 M20120421642477 M22070942264774
