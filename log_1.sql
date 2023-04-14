@@ -164,13 +164,13 @@ FROM new
 WHERE new.id = sale_order_log.id AND amount_signed IS NULL;
 
 -- Recompute contraction and expansion value
-UPDATE log_bis
+UPDATE sale_order_log
 SET amount_contraction = -amount_signed,
     amount_expansion = 0,
     event_type = '15_contraction'
 WHERE amount_signed < 0 AND event_type = '1_expansion';
 
-UPDATE log_bis
+UPDATE sale_order_log
 SET amount_contraction = 0,
     amount_expansion = amount_signed,
     event_type = '1_expansion'
