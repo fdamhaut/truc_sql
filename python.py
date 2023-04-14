@@ -6,7 +6,7 @@ import sys
 from collections import defaultdict
 
 
-conn = psycopg2.connect("dbname=openerp port=5431")
+conn = psycopg2.connect("dbname=openerp")
 cr = conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
 
 last_code = None
@@ -128,19 +128,11 @@ for order_id,logs in orders.items():
 
 
         # Add condition to avoid useless execute
-<<<<<<< HEAD
         logs0[-1]['create_date'] = logs[0]['create_date']
         logs0[-1]['amount_signed'] = -logs0[-2]['recurring_monthly'] if len(logs0) > 1 else 0
         logs0[-1]['recurring_monthly'] = 0.00
         logs0[-1]['new_enterprise_user'] = (logs0[-1]['new_enterprise_user'] or 0) + ent_user
         logs0[-1]['event_type'] = '2_churn' if logs[0]['event_type'] == '0_creation' else '3_transfer'
-=======
-        logs0[i]['create_date'] = logs[0]['create_date']
-        logs0[i]['amount_signed'] = -logs0[i-1]['recurring_monthly'] if i > 0 else 0
-        logs0[i]['recurring_monthly'] = 0.00
-        logs0[i]['new_enterprise_user'] = (logs0[i]['new_enterprise_user'] or 0) + ent_user
-        logs0[i]['event_type'] = '2_churn' if logs[0][0]['event_type']=='0_creation' else '3_transfer'
->>>>>>> d0e23bac065a437c884c6b0f1ca557c0ed1d13bf
 
         cr.execute('''
             UPDATE sale_order_log 
