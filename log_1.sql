@@ -3,22 +3,27 @@ TRUNCATE sale_order_log;
 
 INSERT INTO sale_order_log (SELECT * FROM sale_order_log_bcp);
 
--- UPDATE sale_order
--- SET subscription_state = NULL
--- WHERE subscription_state is not NULL AND state = 'cancel';
+-- TRUNCATE sale_order;
+
+-- INSERT INTO sale_order (SELECT * FROM sale_order_bcp);
+
 
 UPDATE sale_order
-SET state = 'cancel'
-WHERE order_id IN (
-    SELECT id
-    FROM sale_order so 
-    WHERE so.subscription_state = '5_renewed'
-    AND id NOT IN (
-        SELECT DISTINCT subscription_id
-        FROM sale_order
-        WHERE subscription_id IS NOT NULL
-    )
-);
+SET subscription_state = NULL
+WHERE subscription_state is not NULL AND state = 'cancel';
+
+-- UPDATE sale_order
+-- SET state = 'cancel'
+-- WHERE id IN (
+--     SELECT id
+--     FROM sale_order so 
+--     WHERE so.subscription_state = '5_renewed'
+--     AND id NOT IN (
+--         SELECT DISTINCT subscription_id
+--         FROM sale_order
+--         WHERE subscription_id IS NOT NULL
+--     )
+-- );
 
 -- Remove log from cancelled SO
 DELETE FROM sale_order_log
@@ -32,11 +37,12 @@ WHERE order_id IN (
 UPDATE sale_order_log
 SET recurring_monthly = amount_signed,
     amount_signed = recurring_monthly
-WHERE recurring_monthly < amount_signed 
-AND amount_signed = 0 
+WHERE amount_signed = 0 
 AND event_type IN ('2_churn' , '3_transfer')
 AND create_date > '2022-09-06 14:20:41.120188' 
 AND create_date < '2023-02-08 10:42:52.359322';
+--AND recurring_monthly < amount_signed 
+
 
 
 -- Creation that are not the first log are changed into expansion
@@ -107,7 +113,7 @@ WITH SO AS (
         FROM sale_order_log
         ORDER BY order_id, id
         ) l on l.order_id = so.id
-    where ( so.subscription_state = '6_churn'
+    where so.subscription_state = '6_churn'
     and so.state in ('sale', 'done')
     and so.id not in (
         SELECT order_id

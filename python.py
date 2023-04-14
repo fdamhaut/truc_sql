@@ -16,10 +16,10 @@ def show_row(log):
 
 def show_table(logs, error='All right'):
     global last_code
-    if (last_code is None) or (last_code != logs[0]['subscription_code']):
-        last_code = logs[0]['subscription_code']
+    if (last_code is None) or (last_code != logs[0]['ooid']):
+        last_code = logs[0]['ooid']
         print() # new line at each contract
-    print('Order %-8s %-16s %s %s:'% (logs[0]['order_id'], logs[0]['subscription_code'], logs[0]['currency_id'], error))
+    print('Order %-8s %-16s %s %s:'% (logs[0]['order_id'], logs[0]['ooid'], logs[0]['currency_id'], error))
     for log in logs:
         show_row(log)
 
@@ -34,19 +34,19 @@ codes = ('M21043025842286','M22011035087550', 'M22070141784236', 'M2110183176918
 
 
 cr.execute('''
-    select * 
+    select *, coalesce(origin_order_id, order_id) as ooid
     from sale_order_log 
-    order by subscription_code, id''')
+    order by coalesce(origin_order_id, order_id), id''')
 
 logs = cr.fetchall()
 
 prec_order = {}
 for log in logs:
     order_id = log['order_id']
-    if not len(orders[order_id]) and len(code[log['subscription_code']]):
-        prec_order[order_id] = code[log['subscription_code']][-1]
+    if not len(orders[order_id]) and len(code[log['ooid']]):
+        prec_order[order_id] = code[log['ooid']][-1]
     orders[order_id].append(log)
-    code[log['subscription_code']].append(order_id)
+    code[log['ooid']].append(order_id)
 
 
 for order_id,logs in orders.items():
@@ -54,7 +54,7 @@ for order_id,logs in orders.items():
     # If there is a transfer and expansion in same transaction: we might need to merge them
     for i in range(1, len(logs)-1):
         if logs[i]['create_date'] == logs[i+1]['create_date'] and \
-            logs[i]['event_type'] == '3_transfer' and 
+            logs[i]['event_type'] == '3_transfer' and \
             logs[i]['recurring_monthly'] == 0 and\
             logs[i+1]['event_type'] in ('1_expansion', '15_contraction') and \
             logs[i+1]['recurring_monthly'] != (logs[i]['recurring_monthly'] + logs[i+1]['amount_signed']):
@@ -118,8 +118,8 @@ for order_id,logs in orders.items():
 
     # Reconcile Transfer
     if before:
-        if len(logs) > 1 and logs[0]['event_type'] == '3_transfer'\
-           and logs[0]['create_date'] == logs[1]['create_date']:
+        if len(logs) > 1 and logs[0]['event_type'] == '3_transfer' and\
+            logs[0]['currency_id'] == orders[before][-1]['currency_id']:
 
             old_mrr = -orders[before][-1]['amount_signed']
             diff = logs[0]['recurring_monthly'] - old_mrr
@@ -147,7 +147,8 @@ for order_id,logs in orders.items():
                 (logs[0]['event_date'], orders[before][-1]['id']))
 
             print('fixing new transfer')
-        elif len(logs) and logs[0]['event_type'] == '3_transfer':
+        elif len(logs) and logs[0]['event_type'] == '3_transfer' and\
+            logs[0]['currency_id'] == orders[before][-1]['currency_id']:
             old_mrr = - orders[before][-1]['amount_signed']
             new_mrr = logs[0]['recurring_monthly']
             cr.execute('''UPDATE sale_order_log 
