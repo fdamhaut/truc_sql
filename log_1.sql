@@ -44,6 +44,33 @@ AND create_date > '2022-09-06 14:20:41.120188'
 AND create_date < '2023-02-08 10:42:52.359322';
 --AND recurring_monthly < amount_signed 
 
+-- Remove log created by internal to update new_enterprise user count and merge them with the original log
+WITH internal_user AS (
+    SELECT t.id as transfer_id, i.id as internal_id, i.new_enterprise_user as ent_user
+    FROM sale_order_log t
+    JOIN sale_order_log i ON i.id = t.id + 1
+    WHERE t.event_type = '3_transfer'
+    AND t.create_date = i.create_date
+    AND i.event_type IN ('1_expansion', '15_contraction')
+    AND i.new_enterprise_user != 0
+)
+UPDATE sale_order_log
+SET new_enterprise_user = iu.ent_user
+FROM internal_user iu
+WHERE sale_order_log.id = iu.transfer_id;
+
+DELETE 
+FROM sale_order_log
+WHERE id IN (
+    SELECT i.id as internal_id
+    FROM sale_order_log t
+    JOIN sale_order_log i ON i.id = t.id + 1
+    WHERE t.event_type = '3_transfer'
+    AND t.create_date = i.create_date
+    AND i.event_type IN ('1_expansion', '15_contraction')
+    AND i.new_enterprise_user != 0
+);
+-- End internal
 
 -- Creation that are not the first log are changed into expansion M22031437539225 M22092345498172 M20053016649499 M20111620889854
 UPDATE sale_order_log
@@ -148,6 +175,12 @@ SELECT
     SO.rm,
     '2_churn'
 FROM SO;
+
+-- Delete empty logs
+DELETE FROM sale_order_log
+WHERE recurring_monthly = 0
+AND (amount_signed IS NULL or amount_signed = 0)
+AND event_type IN ('1_expansion', '15_contraction');
 
 -- Compute amount_signed if doesn't exist based on recurring_monthly
 WITH new AS (

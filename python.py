@@ -6,13 +6,14 @@ import sys
 from collections import defaultdict
 
 
-conn = psycopg2.connect("dbname=openerp")
+conn = psycopg2.connect("dbname=openerp port=5431")
 cr = conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
 
 last_code = None
 
 def show_row(log):
-    print('%-8d %s    %-15s %10.2f %10.2f'% (log['id'], log['create_date'], log['event_type'], log['amount_signed'] or 0, log['recurring_monthly']))
+    print('%-8d %s %s   %-15s %10.2f %10.2f'% 
+        (log['id'], log['create_date'], log['event_date'], log['event_type'], log['amount_signed'] or 0, log['recurring_monthly']))
 
 def show_table(logs, error='All right'):
     global last_code
@@ -110,6 +111,7 @@ for order_id,logs in orders.items():
             mrr = -logs0[-1]['amount_signed']
             cr.execute('''
                 INSERT INTO sale_order_log(
+                    create_date,
                     order_id,
                     origin_order_id,
                     subscription_code,
@@ -122,9 +124,24 @@ for order_id,logs in orders.items():
                     amount_contraction,
                     event_type
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
-                (l['order_id'], l['ooid'], l['subscription_code'], l['event_date'],
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id''',
+                (l['create_date'], l['order_id'], l['ooid'], l['subscription_code'], l['event_date'],
                  l['currency_id'], '3_progress', mrr, mrr, 0, mrr, event_type))
+            ids = cr.fetchall()[0]['id']
+
+            logs = [{ 'id': ids,
+                    'create_date': l['create_date'],
+                    'order_id': l['order_id'],
+                    'ooid': l['ooid'],
+                    'subscription_code': l['subscription_code'],
+                    'event_date': l['event_date'],
+                    'currency_id': l['currency_id'],
+                    'subscription_state': '3_progress',
+                    'recurring_monthly': mrr,
+                    'amount_signed': mrr,
+                    'event_type': event_type}] + logs
+            orders[order_id] = logs
 
 
 
@@ -224,7 +241,8 @@ print('Between Done')
 # Fix SO 
 for order_id,logs in orders.items():
     # Fix number of transfer
-    sp = sum(map(lambda s:s['event_type'] in ('0_creation', '2_churn'), logs))
+    cre = sum(map(lambda s:s['event_type'] == '0_creation', logs))
+    ch = sum(map(lambda s:s['event_type'] == '2_churn', logs))
     ltr = []
     ltr_id = []
     for n, l in enumerate(logs):
@@ -232,13 +250,22 @@ for order_id,logs in orders.items():
             ltr += [n]
             ltr_id += [l['id']]
 
-    if order_id in has_next:
-        end = -2+sp
-    else:
-        end = -1+sp
-    if end < 0:
-        ltr = ltr[:end]
-        ltr_id = ltr_id[:end]
+    t = cre + ch + len(ltr)
+    # Remove all logs if we could not reconcile
+    if order_id in has_next and t < 2:
+        end = 0
+        ltr = []
+        cr.execute('DELETE from sale_order_log where order_id = %s', (order_id,))
+        del logs[:]
+    # Do no remove first transfer if we need one
+    if not cre:
+        ltr = ltr[1:]
+        ltr_id = ltr_id[1:]
+    # Do no remove last transfer if we need one
+    if order_id in has_next and not ch:
+        ltr = ltr[:-1]
+        ltr_id = ltr_id[:-1]
+    # Remove other transfer
     if ltr:
         cr.execute('DELETE from sale_order_log where id in %s', (tuple(ltr_id),))
         for n in reversed(ltr):
@@ -254,7 +281,7 @@ has_next = set()
 cr.execute('''
     select *, coalesce(origin_order_id, order_id) as ooid
     from sale_order_log 
-    order by coalesce(origin_order_id, order_id), id''')
+    order by coalesce(origin_order_id, order_id), create_date, id''')
 
 logs = cr.fetchall()
 
@@ -271,14 +298,14 @@ for log in logs:
     orders[order_id].append(log)
 
 
-for order_id,logs in orders.items(): 
+for order_id,logs in orders.items():
     new = sum(map(lambda s:s['event_type'] == '0_creation', logs))
     chu = sum(map(lambda s:s['event_type'] == '2_churn', logs))
     tr = sum(map(lambda s:s['event_type'] == '3_transfer', logs))
 
     if new > 1 or chu > 1 or new+chu+tr > 2 or (order_id in has_next and new+chu+tr != 2):
         show_table(logs)
-        print(f'Error in {order_id} : Wrong number of special {new}, {chu}, {tr}')
+        print(f'Error in {order_id} : Wrong number of special {new}, {chu}, {tr}, expected : {2 if order_id in has_next else 1}, got : {new+chu+tr}')
         assert 0 == 1
 
 
