@@ -180,6 +180,44 @@ WHERE recurring_monthly = 0
 AND (amount_signed IS NULL or amount_signed = 0)
 AND event_type IN ('1_expansion', '15_contraction');
 
+-- Ensure every active SO has at least a log
+WITH SO AS (
+    SELECT *
+    FROM sale_order
+    WHERE recurring_monthly > 0 AND id NOT IN (
+        SELECT order_id
+        FROM sale_order_log
+    )
+)
+INSERT INTO sale_order_log (
+    order_id,
+    origin_order_id,
+    subscription_code,
+    event_date,
+    create_date,
+    currency_id,
+    subscription_state,
+    recurring_monthly,
+    amount_signed,
+    amount_expansion,
+    amount_contraction,
+    event_type
+)
+SELECT 
+    id, 
+    origin_order_id,
+    client_order_ref, 
+    date_order::date,
+    date_order,
+    currency_id,
+    subscription_state,
+    recurring_monthly,
+    recurring_monthly,
+    recurring_monthly,
+    0,
+    '0_creation'
+FROM SO;
+
 -- Compute amount_signed if doesn't exist based on recurring_monthly
 WITH new AS (
     SELECT 
@@ -206,3 +244,4 @@ SET amount_contraction = 0,
     event_type = '1_expansion'
 WHERE amount_signed > 0 AND event_type = '15_contraction';
 
+COMMIT;
