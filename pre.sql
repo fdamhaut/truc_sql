@@ -8,23 +8,23 @@ INSERT INTO sale_order_log (SELECT * FROM sale_order_log_bcp);
 -- INSERT INTO sale_order (SELECT * FROM sale_order_bcp);
 
 
--- UPDATE sale_order
--- SET subscription_state = NULL
--- WHERE subscription_state is not NULL AND state = 'cancel';
+UPDATE sale_order
+SET subscription_state = NULL
+WHERE subscription_state is not NULL AND state = 'cancel';
 
--- -- Change renewed with no child to churned M22112156233162, M22112156233162, M22112156233162, M22112156233162
--- UPDATE sale_order 
--- SET subscription_state = '6_churn'
--- WHERE id IN (
---     SELECT id
---     FROM sale_order so 
---     WHERE so.subscription_state = '5_renewed'
---     AND id NOT IN (
---         SELECT DISTINCT subscription_id
---         FROM sale_order
---         WHERE subscription_id IS NOT NULL
---     )
--- );
+-- Change renewed with no child to churned M22112156233162, M22112156233162, M22112156233162, M22112156233162
+UPDATE sale_order 
+SET subscription_state = '6_churn'
+WHERE id IN (
+    SELECT id
+    FROM sale_order so 
+    WHERE so.subscription_state = '5_renewed'
+    AND id NOT IN (
+        SELECT DISTINCT subscription_id
+        FROM sale_order
+        WHERE subscription_id IS NOT NULL
+    )
+);
 
 -- Remove log from cancelled SO M1811038904534 M23011767584878 M1809248620518 M1808078312543
 DELETE FROM sale_order_log
@@ -184,7 +184,9 @@ AND event_type IN ('1_expansion', '15_contraction');
 WITH SO AS (
     SELECT *
     FROM sale_order
-    WHERE recurring_monthly > 0 AND id NOT IN (
+    WHERE recurring_monthly > 0 
+    AND subscription_state IN ('3_progress', '4_paused')
+    AND id NOT IN (
         SELECT order_id
         FROM sale_order_log
     )
