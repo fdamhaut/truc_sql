@@ -36,7 +36,6 @@ has_next = set()
 cr.execute('''
     SELECT *, coalesce(origin_order_id, order_id) as ooid
     FROM sale_order_log
-    WHERE origin_order_id = 2277795
     ORDER BY coalesce(origin_order_id, order_id), order_id, create_date, id
     ''')
 
@@ -57,15 +56,12 @@ for log in logs:
 
 print(order_per_origin[2277795])
 
-show_all()
-
 # Fix Transfer
 for order_id,logs in orders.items():
-
-    print('b')
-    show_all()
     # If there is a transfer and expansion in same transaction: we might need to merge them
     # Maybe useless now
+
+    
     for i in range(1, len(logs)-1):
         if logs[i]['create_date'] == logs[i+1]['create_date'] and \
             logs[i]['event_type'] == '3_transfer' and \
@@ -115,9 +111,6 @@ for order_id,logs in orders.items():
         if not len(logs0):
             break
 
-        print('del')
-        show_all()
-
         # If the first event is not a 'beginning' event
         if logs[0]['event_type'] not in ('3_transfer', '0_creation'):
             l = logs[0]
@@ -158,9 +151,6 @@ for order_id,logs in orders.items():
                     'new_enterprise_user': 0,}] + logs
             orders[order_id] = logs
 
-            print('first')
-            show_all()
-
 
         # We ensure that the 'ending' event of the parent correspond to the 'begin' of this one 
         # Add condition to avoid useless execute
@@ -186,9 +176,6 @@ for order_id,logs in orders.items():
                 logs0[-1]['id'])
             )
 
-        print('old')
-        show_all()
-
         if len(logs0) > 2 and\
             logs0[-2]['event_type'] in ('1_expansion', '15_contraction') and\
             logs0[-2]['create_date'] == logs0[-1]['create_date'] and\
@@ -209,9 +196,6 @@ for order_id,logs in orders.items():
                         ''', (logs0[-2]['id'], -1))
 
             logs0[-1]['id'], logs0[-2]['id'] = logs0[-2]['id'], logs0[-1]['id']
-
-            print('swap')
-            show_all()
 
 
         # Reconcile Transfer
@@ -292,9 +276,6 @@ for order_id,logs in orders.items():
             
                     logs[1]['id'], logs[2]['id'] = logs[2]['id'], logs[1]['id']
 
-                print('recon')
-                show_all()
-
 
 print('Between Done')
 
@@ -331,9 +312,6 @@ for order_id,logs in orders.items():
         for n in reversed(ltr):
             del logs[n]
 
-print('end')
-show_all()
-
 print('IN Done')
 
 
@@ -347,7 +325,6 @@ prec_order = {}
 cr.execute('''
     SELECT *, coalesce(origin_order_id, order_id) as ooid
     FROM sale_order_log
-    WHERE origin_order_id = 2277795
     ORDER BY coalesce(origin_order_id, order_id), order_id, create_date, id
     ''')
 
@@ -363,9 +340,6 @@ for log in logs:
             has_next.add(order_per_origin[origin][-1])
         order_per_origin[origin].append(order_id)
     orders[order_id].append(log)
-
-print('truth')
-show_all()
 
 for order_id in order_per_origin[2277795]:
     show_table(orders[order_id])
