@@ -5,6 +5,7 @@ import psycopg2.extras
 import sys
 from collections import defaultdict
 
+to_show = 2231129
 
 conn = psycopg2.connect("dbname=openerp port=5431")
 cr = conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
@@ -22,19 +23,19 @@ def show_table(logs, error='All right'):
 
 def show_all():
     for order, logs in orders.items():
-        if logs and logs[0]['ooid'] == 2277795:
+        if logs and logs[0]['ooid'] == to_show:
             show_table(logs)
     print()
 
 def show(origin, msg):
-    if origin == 0 or orders[origin][0]['ooid'] == 2277795:
+    if origin == 0 or orders[origin] and orders[origin][0]['ooid'] == to_show:
         print(msg)
         show_all()
 
 
 orders = defaultdict(list)
-order_per_origin = defaultdict(list)
 has_next = set()
+prec_order = {}
 
 # After log_1.sql
 
@@ -48,56 +49,36 @@ cr.execute('''
 logs = cr.fetchall()
 
 
-prec_order = {}
 for log in logs:
-    order_id = log['order_id']
-    origin = log['ooid']
-    if order_id not in orders:
-        if origin in order_per_origin:
-            prec_order[order_id] = order_per_origin[origin][-1]
-            has_next.add(order_per_origin[origin][-1])
-        order_per_origin[origin].append(order_id)
-    orders[order_id].append(log)
+    orders[log['order_id']].append(log)
 
+cr.execute('''
+    SELECT id, subscription_id
+    FROM sale_order
+    WHERE subscription_id IS NOT NULL
+    AND subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
+    ''')
 
-print(order_per_origin[2277795])
+sos = cr.fetchall()
+for so in sos:
+    has_next.add(so['subscription_id'])
+    prec_order[so['id']] = so['subscription_id']
+
 
 show(0, 'begin')
 
 # Fix Transfer
-for order_id,logs in orders.items():
+for order_id, logs in [(o, l) for o, l in orders.items()]:
 
-    if order_id in [2277795, 2296619, 2423043]:
+    if not logs:
+        continue
+
+    if logs and logs[0]['ooid'] == to_show:
         print(order_id)
 
     show(order_id, 'b')
-    # If there is a transfer and expansion in same transaction: we might need to merge them
-    # Maybe useless now
-    for i in range(1, len(logs)-1):
-        if logs[i]['create_date'] == logs[i+1]['create_date'] and \
-            logs[i]['event_type'] == '3_transfer' and \
-            logs[i]['recurring_monthly'] == 0 and\
-            logs[i+1]['event_type'] in ('1_expansion', '15_contraction') and \
-            logs[i+1]['recurring_monthly'] != (logs[i]['recurring_monthly'] + logs[i+1]['amount_signed']):
-
-            cr.execute('''update sale_order_log
-                set id = %s
-                where id = %s
-                ''', (-1, logs[i]['id']))
-            cr.execute('''update sale_order_log
-                set id = %s
-                where id = %s
-                ''', (logs[i]['id'], logs[i+1]['id']))
-            cr.execute('''update sale_order_log
-                set id = %s
-                where id = %s
-                ''', (logs[i+1]['id'], -1))
-
-            logs[i]['id'], logs[i+1]['id'] = logs[i+1]['id'], logs[i]['id']
-            logs[i], logs[i+1] = logs[i+1], logs[i]
 
     # Try to match transfers of new orders
-
     before = prec_order.get(logs[0]['order_id'], None)
     if before and orders[before]:
         # last line before is not a transfer
@@ -342,47 +323,53 @@ print('IN Done')
 
 
 
-orders = defaultdict(list)
-order_per_origin = defaultdict(list)
-has_next = set()
-prec_order = {}
+# orders = defaultdict(list)
+# has_next = set()
+# prec_order = {}
+
+# # After log_1.sql
 
 
-cr.execute('''
-    SELECT *, coalesce(origin_order_id, order_id) as ooid
-    FROM sale_order_log
-    ORDER BY coalesce(origin_order_id, order_id), order_id, create_date, id
-    ''')
+# cr.execute('''
+#     SELECT *, coalesce(origin_order_id, order_id) as ooid
+#     FROM sale_order_log
+#     ORDER BY coalesce(origin_order_id, order_id), order_id, create_date, id
+#     ''')
 
-logs = cr.fetchall()
-
-
-for log in logs:
-    order_id = log['order_id']
-    origin = log['ooid']
-    if order_id not in orders:
-        if origin in order_per_origin:
-            prec_order[order_id] = order_per_origin[origin][-1]
-            has_next.add(order_per_origin[origin][-1])
-        order_per_origin[origin].append(order_id)
-    orders[order_id].append(log)
-
-show(0, 'truth')
+# logs = cr.fetchall()
 
 
-for order_id in order_per_origin[2277795]:
-    show_table(orders[order_id])
+# for log in logs:
+#     orders[log['order_id']].append(log)
+
+# cr.execute('''
+#     SELECT id, subscription_id
+#     FROM sale_order
+#     WHERE subscription_id IS NOT NULL
+#     AND subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
+#     ''')
+
+# sos = cr.fetchall()
+# for so in sos:
+#     has_next.add(so['subscription_id'])
+#     prec_order[so['id']] = so['subscription_id']
+
+# show(0, 'truth')
 
 
-for order_id,logs in orders.items():
-    new = sum(map(lambda s:s['event_type'] == '0_creation', logs))
-    chu = sum(map(lambda s:s['event_type'] == '2_churn', logs))
-    tr = sum(map(lambda s:s['event_type'] == '3_transfer', logs))
+# for order_id in order_per_origin[to_show]:
+#     show_table(orders[order_id])
 
-    if new > 1 or chu > 1 or new+chu+tr > 2 or (order_id in has_next and new+chu+tr != 2):
-        show_table(logs)
-        print(f'Error in {order_id} : Wrong number of special {new}, {chu}, {tr}, expected : {2 if order_id in has_next else 1}, got : {new+chu+tr}')
-        assert 0 == 1
+
+# for order_id,logs in orders.items():
+#     new = sum(map(lambda s:s['event_type'] == '0_creation', logs))
+#     chu = sum(map(lambda s:s['event_type'] == '2_churn', logs))
+#     tr = sum(map(lambda s:s['event_type'] == '3_transfer', logs))
+
+#     if new > 1 or chu > 1 or new+chu+tr > 2 or (order_id in has_next and new+chu+tr != 2):
+#         show_table(logs)
+#         print(f'Error in {order_id} : Wrong number of special {new}, {chu}, {tr}, expected : {2 if order_id in has_next else 1}, got : {new+chu+tr}')
+#         assert 0 == 1
 
 
 conn.rollback()

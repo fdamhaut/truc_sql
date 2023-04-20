@@ -5,6 +5,7 @@ import psycopg2.extras
 import sys
 from collections import defaultdict
 
+to_show = 2277795
 
 conn = psycopg2.connect("dbname=openerp port=5431")
 cr = conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
@@ -22,13 +23,19 @@ def show_table(logs, error='All right'):
 
 def show_all():
     for order, logs in orders.items():
-        show_table(logs)
+        if logs and logs[0]['ooid'] == to_show:
+            show_table(logs)
     print()
+
+def show(origin, msg):
+    if origin == 0 or orders[origin] and orders[origin][0]['ooid'] == to_show:
+        print(msg)
+        show_all()
 
 
 orders = defaultdict(list)
-order_per_origin = defaultdict(list)
 has_next = set()
+prec_order = {}
 
 # After log_1.sql
 
@@ -42,51 +49,36 @@ cr.execute('''
 logs = cr.fetchall()
 
 
-prec_order = {}
 for log in logs:
-    order_id = log['order_id']
-    origin = log['ooid']
-    if order_id not in orders:
-        if origin in order_per_origin:
-            prec_order[order_id] = order_per_origin[origin][-1]
-            has_next.add(order_per_origin[origin][-1])
-        order_per_origin[origin].append(order_id)
-    orders[order_id].append(log)
+    orders[log['order_id']].append(log)
+
+cr.execute('''
+    SELECT id, subscription_id
+    FROM sale_order
+    WHERE subscription_id IS NOT NULL
+    AND subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
+    ''')
+
+sos = cr.fetchall()
+for so in sos:
+    has_next.add(so['subscription_id'])
+    prec_order[so['id']] = so['subscription_id']
 
 
-print(order_per_origin[2277795])
+show(0, 'begin')
 
 # Fix Transfer
-for order_id,logs in orders.items():
-    # If there is a transfer and expansion in same transaction: we might need to merge them
-    # Maybe useless now
+for order_id, logs in [(o, l) for o, l in orders.items()]:
 
-    
-    for i in range(1, len(logs)-1):
-        if logs[i]['create_date'] == logs[i+1]['create_date'] and \
-            logs[i]['event_type'] == '3_transfer' and \
-            logs[i]['recurring_monthly'] == 0 and\
-            logs[i+1]['event_type'] in ('1_expansion', '15_contraction') and \
-            logs[i+1]['recurring_monthly'] != (logs[i]['recurring_monthly'] + logs[i+1]['amount_signed']):
+    if not logs:
+        continue
 
-            cr.execute('''update sale_order_log
-                set id = %s
-                where id = %s
-                ''', (-1, logs[i]['id']))
-            cr.execute('''update sale_order_log
-                set id = %s
-                where id = %s
-                ''', (logs[i]['id'], logs[i+1]['id']))
-            cr.execute('''update sale_order_log
-                set id = %s
-                where id = %s
-                ''', (logs[i+1]['id'], -1))
+    if logs and logs[0]['ooid'] == to_show:
+        print(order_id)
 
-            logs[i]['id'], logs[i+1]['id'] = logs[i+1]['id'], logs[i]['id']
-            logs[i], logs[i+1] = logs[i+1], logs[i]
+    show(order_id, 'b')
 
     # Try to match transfers of new orders
-
     before = prec_order.get(logs[0]['order_id'], None)
     if before and orders[before]:
         # last line before is not a transfer
@@ -108,8 +100,12 @@ for order_id,logs in orders.items():
                 cr.execute('DELETE from sale_order_log where create_date > %s AND order_id = %s',
                      (f_trch['create_date'], before))
                 break
-        if not len(logs0):
-            break
+
+        logs0 = orders[before]
+        if not logs0:
+            continue
+
+        show(order_id, 'del')
 
         # If the first event is not a 'beginning' event
         if logs[0]['event_type'] not in ('3_transfer', '0_creation'):
@@ -151,10 +147,12 @@ for order_id,logs in orders.items():
                     'new_enterprise_user': 0,}] + logs
             orders[order_id] = logs
 
+            show(order_id, 'first')
 
         # We ensure that the 'ending' event of the parent correspond to the 'begin' of this one 
         # Add condition to avoid useless execute
         logs0[-1]['create_date'] = logs[0]['create_date']
+        logs0[-1]['event_date'] = logs[0]['event_date']
         logs0[-1]['amount_signed'] = -logs0[-2]['recurring_monthly'] if len(logs0) > 1 else 0
         logs0[-1]['recurring_monthly'] = 0.00
         logs0[-1]['new_enterprise_user'] = (logs0[-1]['new_enterprise_user'] or 0) + ent_user
@@ -163,18 +161,22 @@ for order_id,logs in orders.items():
         cr.execute('''
             UPDATE sale_order_log 
             SET amount_signed = %s, 
-                create_date = %s, 
+                create_date = %s,
+                event_date = %s,
                 recurring_monthly = %s, 
                 event_type = %s,
                 new_enterprise_user = %s
             WHERE id = %s'''
             , (logs0[-1]['amount_signed'], 
-                logs0[-1]['create_date'], 
+                logs0[-1]['create_date'],
+                logs0[-1]['event_date'], 
                 0.00, 
                 logs0[-1]['event_type'],
                 logs0[-1]['new_enterprise_user'], 
                 logs0[-1]['id'])
             )
+
+        show(order_id, 'old')
 
         if len(logs0) > 2 and\
             logs0[-2]['event_type'] in ('1_expansion', '15_contraction') and\
@@ -196,6 +198,8 @@ for order_id,logs in orders.items():
                         ''', (logs0[-2]['id'], -1))
 
             logs0[-1]['id'], logs0[-2]['id'] = logs0[-2]['id'], logs0[-1]['id']
+
+            show(order_id, 'swap')
 
 
         # Reconcile Transfer
@@ -240,7 +244,7 @@ for order_id,logs in orders.items():
                 )
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 RETURNING id''',
-                (l['order_id'], l['origin_order_id'], l['subscription_code'], l['event_date'], l['create_date'],
+                (l['order_id'], l['ooid'], l['subscription_code'], l['event_date'], l['create_date'],
                  l['currency_id'], '3_progress', new_mrr, new_mrr - old_mrr, 0, new_mrr - old_mrr, '1_expansion'))
                 ids = cr.fetchall()[0]['id']
                 orders[order_id] = [logs[0]] + [{ 'id': ids,
@@ -276,6 +280,7 @@ for order_id,logs in orders.items():
             
                     logs[1]['id'], logs[2]['id'] = logs[2]['id'], logs[1]['id']
 
+                show(order_id, 'recon')
 
 print('Between Done')
 
@@ -312,6 +317,8 @@ for order_id,logs in orders.items():
         for n in reversed(ltr):
             del logs[n]
 
+show(0, 'end')
+
 print('IN Done')
 
 
@@ -325,7 +332,7 @@ prec_order = {}
 cr.execute('''
     SELECT *, coalesce(origin_order_id, order_id) as ooid
     FROM sale_order_log
-    ORDER BY coalesce(origin_order_id, order_id), order_id, create_date, id
+    ORDER BY coalesce(origin_order_id, order_id), create_date, id
     ''')
 
 logs = cr.fetchall()
@@ -341,7 +348,10 @@ for log in logs:
         order_per_origin[origin].append(order_id)
     orders[order_id].append(log)
 
-for order_id in order_per_origin[2277795]:
+show(0, 'truth')
+
+
+for order_id in order_per_origin[to_show]:
     show_table(orders[order_id])
 
 
