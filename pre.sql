@@ -124,10 +124,61 @@ WHERE id IN (
     SELECT log.id
     FROM sale_order_log log
     JOIN sale_order so ON so.id = log.order_id
-    WHERE event_date >= '2023-04-13'
+    WHERE event_date >= CURRENT_DATE::timestamp
     AND so.subscription_state IN ('6_churn', '5_renewed', '3_progress', '4_paused')
 );
 
+
+UPDATE sale_order_log log
+SET event_date = LEAST(log.event_date, so.date_end::date)
+FROM (
+    SELECT *, COALESCE(end_date, next_invoice_date) as date_end
+    FROM sale_order
+) so
+WHERE so.id = log.order_id
+AND so.subscription_state IN ('5_renewed', '6_churn')
+AND so.date_end IS NOT NULL AND so.date_end < CURRENT_DATE
+AND event_date > so.date_end::date;
+
+-- Ensure there is no 'churn-only' order M22101747004776
+WITH SO AS (
+    SELECT *
+    FROM sale_order
+    WHERE subscription_state IN ('5_renewed', '6_churn')
+    AND id NOT IN (
+        SELECT order_id
+        FROM sale_order_log
+        WHERE event_type != '2_churn'
+    )
+)
+INSERT INTO sale_order_log (
+    order_id,
+    origin_order_id,
+    subscription_code,
+    event_date,
+    create_date,
+    currency_id,
+    subscription_state,
+    recurring_monthly,
+    amount_signed,
+    amount_expansion,
+    amount_contraction,
+    event_type
+)
+SELECT 
+    id, 
+    origin_order_id,
+    client_order_ref, 
+    date_order::date,
+    date_order,
+    currency_id,
+    subscription_state,
+    recurring_monthly,
+    recurring_monthly,
+    recurring_monthly,
+    0,
+    '0_creation'
+FROM SO;
 
 -- We add churned log to churned SO with no churn log M20092219749813 M1608031437668 M140703666487
 WITH SO AS (
@@ -137,7 +188,7 @@ WITH SO AS (
     JOIN (
         SELECT DISTINCT ON (order_id) order_id, recurring_monthly, id
         FROM sale_order_log
-        ORDER BY order_id, id
+        ORDER BY order_id, event_date DESC, create_date DESC, id DESC
         ) l on l.order_id = so.id
     where so.subscription_state = '6_churn'
     and so.state in ('sale', 'done')
@@ -167,7 +218,7 @@ SELECT
     SO.origin_order_id,
     SO.client_order_ref, 
     LEAST(SO.end_date::date, CURRENT_DATE),
-    LEAST(SO.end_date::date, CURRENT_DATE)::timestamp,
+    CURRENT_DATE,
     SO.currency_id,
     SO.subscription_state,
     '0',
@@ -176,8 +227,6 @@ SELECT
     SO.rm,
     '2_churn'
 FROM SO;
-
-
 
 -- Delete empty logs
 DELETE FROM sale_order_log
@@ -237,6 +286,52 @@ UPDATE sale_order_log
 SET amount_signed = COALESCE(new.as, recurring_monthly)
 FROM new 
 WHERE new.id = sale_order_log.id AND amount_signed IS NULL;
+
+-- Set creation to all child id that have brother subscription M21101131501557
+WITH cp as (
+    SELECT id, subscription_id AS pid
+    FROM sale_order 
+    WHERE subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
+), ch AS (
+    SELECT DISTINCT one.id
+    FROM cp one
+    JOIN cp two ON one.pid = two.pid
+    WHERE one.id != two.id
+)
+UPDATE sale_order_log log
+SET event_type = '0_creation'
+FROM ch 
+WHERE log.order_id IN (
+    SELECT * FROM ch
+)
+AND log.id IN (
+    SELECT DISTINCT ON (order_id) id
+    FROM sale_order_log
+    WHERE event_type IN ('0_creation', '3_transfer')
+    ORDER BY order_id, create_date, id
+)
+AND order_id NOT IN (
+    SELECT DISTINCT order_id
+    FROM sale_order_log
+    WHERE event_type = '0_creation'
+)
+AND event_type = '3_transfer'
+AND recurring_monthly = amount_signed;
+
+
+-- Remove all transfer from SO with both creation and churn M21051126175578
+DELETE FROM sale_order_log
+WHERE event_type = '3_transfer'
+AND order_id IN (    
+    SELECT DISTINCT order_id
+    FROM sale_order_log
+    WHERE event_type = '0_creation'
+)
+AND order_id IN (
+    SELECT DISTINCT order_id
+    FROM sale_order_log
+    WHERE event_type = '2_churn'
+);
 
 -- Recompute contraction and expansion value
 UPDATE sale_order_log

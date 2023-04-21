@@ -32,13 +32,11 @@ def show(origin, msg):
         print(msg)
         show_all()
 
+# After pre.sql
 
 orders = defaultdict(list)
 has_next = set()
 prec_order = {}
-
-# After log_1.sql
-
 
 cr.execute('''
     SELECT *, coalesce(origin_order_id, order_id) as ooid
@@ -83,29 +81,6 @@ for order_id, logs in [(o, l) for o, l in orders.items()]:
     if before and orders[before]:
         # last line before is not a transfer
         logs0 = orders[before]
-
-        ent_user = 0
-        for i in range(len(logs0)):
-            if logs0[i]['create_date'] > logs[0]['create_date']:
-                cr.execute('SELECT sum(coalesce(new_enterprise_user, 0)) as sum from sale_order_log where id > %s and order_id = %s', (logs0[i]['id'], before))
-                ent_user = cr.fetchall()[0]['sum'] or 0
-                f_trch = logs[0]
-                nf = i
-                if logs0[i-1]['event_type'] not in ('3_transfer', '2_churn'):
-                    for n, l in enumerate(logs0[i:]):
-                        if l['event_type'] in ('3_transfer', '2_churn'):
-                            f_trch = l
-                            nf = n + i + 1
-                del logs0[nf:]
-                cr.execute('DELETE from sale_order_log where create_date > %s AND order_id = %s',
-                     (f_trch['create_date'], before))
-                break
-
-        logs0 = orders[before]
-        if not logs0:
-            continue
-
-        show(order_id, 'del')
 
         # If the first event is not a 'beginning' event
         if logs[0]['event_type'] not in ('3_transfer', '0_creation'):
@@ -155,7 +130,7 @@ for order_id, logs in [(o, l) for o, l in orders.items()]:
         logs0[-1]['event_date'] = logs[0]['event_date']
         logs0[-1]['amount_signed'] = -logs0[-2]['recurring_monthly'] if len(logs0) > 1 else 0
         logs0[-1]['recurring_monthly'] = 0.00
-        logs0[-1]['new_enterprise_user'] = (logs0[-1]['new_enterprise_user'] or 0) + ent_user
+        logs0[-1]['new_enterprise_user'] = (logs0[-1]['new_enterprise_user'] or 0)
         logs0[-1]['event_type'] = '2_churn' if logs[0]['event_type'] == '0_creation' else '3_transfer'
 
         cr.execute('''
@@ -321,55 +296,46 @@ show(0, 'end')
 
 print('IN Done')
 
+# After pre.sql
+
+orders = defaultdict(list)
+has_next = set()
+prec_order = {}
+
+cr.execute('''
+    SELECT *, coalesce(origin_order_id, order_id) as ooid
+    FROM sale_order_log
+    ORDER BY coalesce(origin_order_id, order_id), order_id, create_date, id
+    ''')
+logs = cr.fetchall()
+
+for log in logs:
+    orders[log['order_id']].append(log)
+
+cr.execute('''
+    SELECT id, subscription_id
+    FROM sale_order
+    WHERE subscription_id IS NOT NULL
+    AND subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
+    ''')
+sos = cr.fetchall()
+
+for so in sos:
+    has_next.add(so['subscription_id'])
+    prec_order[so['id']] = so['subscription_id']
 
 
-# orders = defaultdict(list)
-# has_next = set()
-# prec_order = {}
+show(0, 'truth')
 
-# # After log_1.sql
+for order_id,logs in orders.items():
+    new = sum(map(lambda s:s['event_type'] == '0_creation', logs))
+    chu = sum(map(lambda s:s['event_type'] == '2_churn', logs))
+    tr = sum(map(lambda s:s['event_type'] == '3_transfer', logs))
 
-
-# cr.execute('''
-#     SELECT *, coalesce(origin_order_id, order_id) as ooid
-#     FROM sale_order_log
-#     ORDER BY coalesce(origin_order_id, order_id), order_id, create_date, id
-#     ''')
-
-# logs = cr.fetchall()
+    if new > 1 or chu > 1 or new+chu+tr > 2 or (order_id in has_next and new+chu+tr != 2):
+        show_table(logs)
+        print(f'Error in {order_id} : Wrong number of special {new}, {chu}, {tr}, expected : {2 if order_id in has_next else 1}, got : {new+chu+tr}')
+        assert 0 == 1
 
 
-# for log in logs:
-#     orders[log['order_id']].append(log)
-
-# cr.execute('''
-#     SELECT id, subscription_id
-#     FROM sale_order
-#     WHERE subscription_id IS NOT NULL
-#     AND subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
-#     ''')
-
-# sos = cr.fetchall()
-# for so in sos:
-#     has_next.add(so['subscription_id'])
-#     prec_order[so['id']] = so['subscription_id']
-
-# show(0, 'truth')
-
-
-# for order_id in order_per_origin[to_show]:
-#     show_table(orders[order_id])
-
-
-# for order_id,logs in orders.items():
-#     new = sum(map(lambda s:s['event_type'] == '0_creation', logs))
-#     chu = sum(map(lambda s:s['event_type'] == '2_churn', logs))
-#     tr = sum(map(lambda s:s['event_type'] == '3_transfer', logs))
-
-#     if new > 1 or chu > 1 or new+chu+tr > 2 or (order_id in has_next and new+chu+tr != 2):
-#         show_table(logs)
-#         print(f'Error in {order_id} : Wrong number of special {new}, {chu}, {tr}, expected : {2 if order_id in has_next else 1}, got : {new+chu+tr}')
-#         assert 0 == 1
-
-
-conn.rollback()
+conn.commit()

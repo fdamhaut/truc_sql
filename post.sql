@@ -1,5 +1,35 @@
 BEGIN;
 
+-- Remove what is after churn
+WITH churns AS (
+    SELECT id, order_id, event_date, create_date
+    FROM sale_order_log
+    WHERE event_type = '2_churn'
+), after AS (
+    SELECT c.id as churn_id, sum(new_enterprise_user) as sum_ent
+    FROM sale_order_log log
+    JOIN churns c ON c.order_id = log.order_id
+    AND log.event_date > c.event_date
+    GROUP BY c.id
+)
+UPDATE sale_order_log log
+SET new_enterprise_user = new_enterprise_user + after.sum_ent
+FROM after
+WHERE after.churn_id = log.id;
+
+WITH churns AS (
+    SELECT id, order_id, event_date, create_date
+    FROM sale_order_log
+    WHERE event_type = '2_churn'
+), log AS (
+    SELECT log.id
+    FROM sale_order_log log
+    JOIN churns c ON c.order_id = log.order_id
+    WHERE log.event_date > c.event_date
+)
+DELETE FROM sale_order_log
+where id IN (SELECT * FROM log);
+
 -- Reconcile based on SO
 WITH SO AS (
     SELECT DISTINCT ON (log.order_id) log.id, so.recurring_monthly, so.subscription_state, so.currency_id
@@ -39,10 +69,26 @@ FROM sale_order_log log
 JOIN SO ON SO.id = log.id
 WHERE SO.recurring_monthly != log.recurring_monthly OR SO.currency_id != log.currency_id;
 
-
+-- Set churn to 0
 UPDATE sale_order_log
 SET recurring_monthly = 0
 WHERE event_type = '2_churn' 
+AND recurring_monthly != 0;
+
+-- last log of closed are set to 0 M21011822651180
+WITH last AS (
+    SELECT DISTINCT ON (order_id) id
+    FROM sale_order_log
+    WHERE order_id IN (
+        SELECT id
+        FROM sale_order 
+        WHERE subscription_state IN ('5_renewed', '6_churn')
+    )
+    ORDER BY order_id, event_date DESC, create_date DESC, id DESC
+)
+UPDATE sale_order_log log
+SET recurring_monthly = 0
+WHERE log.id IN (SELECT * FROM last)
 AND recurring_monthly != 0;
 
 -- Compute amount_signed based on recurring_monthly
