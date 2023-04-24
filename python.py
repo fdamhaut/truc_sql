@@ -89,6 +89,9 @@ for order_id, logs in [(o, l) for o, l in orders.items()]:
             mrr = -logs0[-1]['amount_signed']
             cr.execute('''
                 INSERT INTO sale_order_log(
+                    company_id,
+                    user_id,
+                    team_id,
                     create_date,
                     order_id,
                     origin_order_id,
@@ -102,10 +105,10 @@ for order_id, logs in [(o, l) for o, l in orders.items()]:
                     amount_contraction,
                     event_type
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 RETURNING id''',
-                (l['create_date'], l['order_id'], l['ooid'], l['subscription_code'], l['event_date'],
-                 l['currency_id'], '3_progress', mrr, mrr, 0, mrr, event_type))
+                (l['company_id'], l['user_id'], l['team_id'], l['create_date'], l['order_id'], l['ooid'], 
+                l['subscription_code'], l['event_date'], l['currency_id'], '3_progress', mrr, mrr, 0, mrr, event_type))
             ids = cr.fetchall()[0]['id']
 
             logs = [{ 'id': ids,
@@ -204,6 +207,9 @@ for order_id, logs in [(o, l) for o, l in orders.items()]:
                 # TODO insert MRR Change
                 cr.execute('''
                 INSERT INTO sale_order_log(
+                    company_id,
+                    user_id,
+                    team_id,
                     order_id,
                     origin_order_id,
                     subscription_code,
@@ -217,10 +223,10 @@ for order_id, logs in [(o, l) for o, l in orders.items()]:
                     amount_contraction,
                     event_type
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 RETURNING id''',
-                (l['order_id'], l['ooid'], l['subscription_code'], l['event_date'], l['create_date'],
-                 l['currency_id'], '3_progress', new_mrr, new_mrr - old_mrr, 0, new_mrr - old_mrr, '1_expansion'))
+                (l['company_id'], l['user_id'], l['team_id'], l['order_id'], l['ooid'], l['subscription_code'], 
+                l['event_date'], l['create_date'], l['currency_id'], '3_progress', new_mrr, new_mrr - old_mrr, 0, new_mrr - old_mrr, '1_expansion'))
                 ids = cr.fetchall()[0]['id']
                 orders[order_id] = [logs[0]] + [{ 'id': ids,
                     'create_date': l['create_date'],

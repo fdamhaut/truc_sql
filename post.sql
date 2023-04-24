@@ -39,6 +39,9 @@ WITH SO AS (
     ORDER BY log.order_id, event_date DESC, event_type DESC, log.create_date DESC, id DESC
 )
 INSERT INTO sale_order_log (
+	company_id,
+    user_id,
+    team_id,
     order_id,
     origin_order_id,
     subscription_code,
@@ -53,6 +56,9 @@ INSERT INTO sale_order_log (
     event_type
 )
 SELECT 
+    log.company_id,
+    log.user_id,
+    log.team_id,
     log.order_id, 
     log.origin_order_id, 
     log.subscription_code,
@@ -151,6 +157,9 @@ WITH currency_change AS (
     FROM sale_order_log
 )
 INSERT INTO sale_order_log (
+	company_id,
+    user_id,
+    team_id,
     order_id,
     origin_order_id,
     subscription_code,
@@ -165,6 +174,9 @@ INSERT INTO sale_order_log (
     event_type
 )
 SELECT 
+    log.company_id,
+    log.user_id,
+    log.team_id,
     log.order_id, 
     log.origin_order_id, 
     log.subscription_code,

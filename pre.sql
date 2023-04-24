@@ -8,24 +8,24 @@ INSERT INTO sale_order_log (SELECT * FROM sale_order_log_bcp);
 -- INSERT INTO sale_order (SELECT * FROM sale_order_bcp);
 
 
--- UPDATE sale_order
--- SET subscription_state = NULL
--- WHERE subscription_state is not NULL AND state = 'cancel';
+UPDATE sale_order
+SET subscription_state = NULL
+WHERE subscription_state is not NULL AND state = 'cancel';
 
--- -- Change renewed with no child to churned M22112156233162, M22112156233162, M22112156233162, M22112156233162
--- UPDATE sale_order 
--- SET subscription_state = '6_churn'
--- WHERE id IN (
---     SELECT id
---     FROM sale_order so 
---     WHERE so.subscription_state = '5_renewed'
---     AND id NOT IN (
---         SELECT DISTINCT subscription_id
---         FROM sale_order
---         WHERE subscription_id IS NOT NULL
---         AND subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
---     )
--- );
+-- Change renewed with no child to churned M22112156233162, M22112156233162, M22112156233162, M22112156233162
+UPDATE sale_order 
+SET subscription_state = '6_churn'
+WHERE id IN (
+    SELECT id
+    FROM sale_order so 
+    WHERE so.subscription_state = '5_renewed'
+    AND id NOT IN (
+        SELECT DISTINCT subscription_id
+        FROM sale_order
+        WHERE subscription_id IS NOT NULL
+        AND subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
+    )
+);
 
 -- Remove log from cancelled SO M1811038904534 M23011767584878 M1809248620518 M1808078312543
 DELETE FROM sale_order_log
@@ -152,6 +152,9 @@ WITH SO AS (
     )
 )
 INSERT INTO sale_order_log (
+    company_id,
+    user_id,
+    team_id,
     order_id,
     origin_order_id,
     subscription_code,
@@ -166,6 +169,9 @@ INSERT INTO sale_order_log (
     event_type
 )
 SELECT 
+    company_id,
+    user_id,
+    team_id,
     id, 
     origin_order_id,
     client_order_ref, 
@@ -183,7 +189,7 @@ FROM SO;
 -- We add churned log to churned SO with no churn log M20092219749813 M1608031437668 M140703666487
 WITH SO AS (
     SELECT so.id, COALESCE(end_date, next_invoice_date) as end_date, origin_order_id, client_order_ref, 
-        currency_id, subscription_state, l.recurring_monthly as rm
+        currency_id, subscription_state, l.recurring_monthly as rm, company_id, user_id, team_id
     from sale_order so
     JOIN (
         SELECT DISTINCT ON (order_id) order_id, recurring_monthly, id
@@ -200,6 +206,9 @@ WITH SO AS (
     )
 )
 INSERT INTO sale_order_log (
+    company_id,
+    user_id,
+    team_id,
     order_id,
     origin_order_id,
     subscription_code,
@@ -214,6 +223,9 @@ INSERT INTO sale_order_log (
     event_type
 )
 SELECT 
+    SO.company_id,
+    ŚO.user_id,
+    SO.team_id,
     SO.id, 
     SO.origin_order_id,
     SO.client_order_ref, 
@@ -246,6 +258,9 @@ WITH SO AS (
     )
 )
 INSERT INTO sale_order_log (
+    company_id,
+    user_id,
+    team_id,
     order_id,
     origin_order_id,
     subscription_code,
@@ -259,7 +274,10 @@ INSERT INTO sale_order_log (
     amount_contraction,
     event_type
 )
-SELECT 
+SELECT
+    company_id,
+    user_id,
+    team_id,
     id, 
     origin_order_id,
     client_order_ref, 
