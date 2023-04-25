@@ -112,6 +112,9 @@ for order_id, logs in [(o, l) for o, l in orders.items()]:
             ids = cr.fetchall()[0]['id']
 
             logs = [{ 'id': ids,
+                    'company_id': l['company_id'],
+                    'user_id': l['user_id'],
+                    'team_id': l['team_id'],
                     'create_date': l['create_date'],
                     'order_id': l['order_id'],
                     'ooid': l['ooid'],
@@ -228,7 +231,11 @@ for order_id, logs in [(o, l) for o, l in orders.items()]:
                 (l['company_id'], l['user_id'], l['team_id'], l['order_id'], l['ooid'], l['subscription_code'], 
                 l['event_date'], l['create_date'], l['currency_id'], '3_progress', new_mrr, new_mrr - old_mrr, 0, new_mrr - old_mrr, '1_expansion'))
                 ids = cr.fetchall()[0]['id']
-                orders[order_id] = [logs[0]] + [{ 'id': ids,
+                orders[order_id] = [logs[0]] + [
+                {   'id': ids,
+                    'company_id': l['company_id'],
+                    'user_id': l['user_id'],
+                    'team_id': l['team_id'],
                     'create_date': l['create_date'],
                     'order_id': l['order_id'],
                     'ooid': l['ooid'],

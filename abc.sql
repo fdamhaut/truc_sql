@@ -655,3 +655,86 @@ UPDATE sale_order_log log
 SET recurring_monthly = 0
 WHERE log.id IN (SELECT * FROM last)
 AND recurring_monthly != 0;
+
+
+
+WITH SO AS (
+    SELECT id 
+    FROM sale_order
+    WHERE subscription_state IN ('5_renewed', '6_churn')
+), ent_sum AS (
+    SELECT order_id, sum(new_enterprise_user) as s
+    FROM sale_order_log
+    GROUP BY order_id
+)
+SELECT id, s
+FROM SO
+JOIN ent_sum ON ent_sum.order_id = SO.id
+WHERE s != 0;
+
+WITH SO AS (
+    SELECT id 
+    FROM sale_order
+    WHERE subscription_state IN ('5_renewed', '6_churn')
+), ent_sum AS (
+    SELECT order_id, sum(new_enterprise_user) as s
+    FROM sale_order_log
+    GROUP BY order_id
+)
+SELECT sum(s)
+FROM SO
+JOIN ent_sum ON ent_sum.order_id = SO.id
+WHERE s != 0;
+
+WITH SO AS (
+    SELECT id 
+    FROM sale_order
+    WHERE subscription_state IN ('5_renewed', '6_churn')
+), ent_sum AS (
+    SELECT order_id, sum(new_enterprise_user) as s
+    FROM sale_order_log
+    GROUP BY order_id
+), last AS (
+    SELECT DISTINCT ON (order_id) order_id, id
+    FROM sale_order_log
+    ORDER BY order_id, event_date DESC, create_date DESC, id DESC
+)
+UPDATE sale_order_log log
+SET new_enterprise_user = new_enterprise_user - ent_sum.s
+FROM last
+JOIN SO ON last.order_id = SO.id
+JOIN ent_sum ON ent_sum.order_id = SO.id
+WHERE last.id = log.id;
+
+-- Reconcile based on SO
+WITH SO AS (
+    SELECT DISTINCT ON (log.order_id) log.id, so.recurring_monthly, so.subscription_state, so.currency_id
+    FROM sale_order_log log
+    JOIN sale_order so ON so.id = log.order_id
+    WHERE so.subscription_state IN ('5_renewed', '6_churn')
+    ORDER BY log.order_id, event_date DESC, log.create_date DESC, id DESC
+)
+SELECT 
+    log.company_id,
+    log.user_id,
+    log.team_id,
+    log.order_id, 
+    log.origin_order_id, 
+    log.subscription_code,
+    log.event_date,
+    log.create_date,
+    SO.currency_id,
+    SO.subscription_state,
+    SO.recurring_monthly,
+    SO.recurring_monthly - log.recurring_monthly ,
+    GREATEST(SO.recurring_monthly - log.recurring_monthly, 0),
+    GREATEST(-SO.recurring_monthly + log.recurring_monthly, 0),
+    CASE WHEN SO.recurring_monthly - log.recurring_monthly > 0 THEN '1_expansion' ELSE '15_contraction' END
+FROM sale_order_log log
+JOIN SO ON SO.id = log.id
+WHERE SO.recurring_monthly != log.recurring_monthly OR SO.currency_id != log.currency_id;
+
+
+2198913
+
+

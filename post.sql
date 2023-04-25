@@ -111,13 +111,6 @@ FROM new
 WHERE new.id = sale_order_log.id 
 AND amount_signed != COALESCE(new.as, recurring_monthly);
 
--- Delete empty log
-DELETE
-FROM sale_order_log
-WHERE (amount_signed = 0 OR amount_signed IS NULL)
-AND event_type IN ('1_expansion', '15_contraction')
-AND (new_enterprise_user = 0 OR new_enterprise_user IS NULL);
-
 -- Recompute contraction and expansion value
 UPDATE sale_order_log
 SET amount_contraction = -amount_signed,
@@ -194,5 +187,12 @@ JOIN currency_change cc ON log.id = cc.new_id
 WHERE cc.cc != 0 
 AND cc.old_c IS NOT NULL
 AND cc.old_rm != 0; 
+
+-- Delete empty log
+DELETE
+FROM sale_order_log
+WHERE (amount_signed = 0 OR amount_signed IS NULL)
+AND event_type IN ('1_expansion', '15_contraction')
+AND (new_enterprise_user = 0 OR new_enterprise_user IS NULL);
 
 COMMIT;

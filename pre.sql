@@ -190,18 +190,18 @@ FROM SO;
 WITH SO AS (
     SELECT so.id, COALESCE(end_date, next_invoice_date) as end_date, origin_order_id, client_order_ref, 
         currency_id, subscription_state, l.recurring_monthly as rm, company_id, user_id, team_id
-    from sale_order so
+    FROM sale_order so
     JOIN (
         SELECT DISTINCT ON (order_id) order_id, recurring_monthly, id
         FROM sale_order_log
         ORDER BY order_id, event_date DESC, create_date DESC, id DESC
         ) l on l.order_id = so.id
-    where so.subscription_state = '6_churn'
+    WHERE so.subscription_state = '6_churn'
     and so.state in ('sale', 'done')
     and so.id not in (
         SELECT order_id
-        from sale_order_log
-        where event_type = '2_churn'
+        FROM sale_order_log
+        WHERE event_type = '2_churn'
         AND order_id IS NOT NULL
     )
 )
@@ -224,7 +224,7 @@ INSERT INTO sale_order_log (
 )
 SELECT 
     SO.company_id,
-    ŚO.user_id,
+    SO.user_id,
     SO.team_id,
     SO.id, 
     SO.origin_order_id,
