@@ -276,12 +276,12 @@ print('Between Done')
 # Fix SO 
 for order_id,logs in orders.items():
     # Fix number of transfer
-    cre = sum(map(lambda s:s['event_type'] == '0_creation', logs))
     ch = sum(map(lambda s:s['event_type'] == '2_churn', logs))
 
     # remove excess churn
     if ch > 1:
-        chtr = chtr_id = []
+        chtr = []
+        chtr_id = []
         for n, l in enumerate(logs):
             if l['event_type'] == '2_churn':
                 chtr += [n]
@@ -292,9 +292,13 @@ for order_id,logs in orders.items():
         for n in reversed(chtr):
             del logs[n]
 
+    logs = logs
+
+    cre = sum(map(lambda s:s['event_type'] == '0_creation', logs))
     # remove excess creation
     if cre > 1:
-        cretr = cretr_id = []
+        cretr = []
+        cretr_id = []
         for n, l in enumerate(logs):
             if l['event_type'] == '0_creation':
                 cretr += [n]

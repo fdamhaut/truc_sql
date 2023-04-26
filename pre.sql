@@ -310,6 +310,23 @@ SET create_date = GREATEST(log.create_date, ch_cr.create_date + interval '1 hour
 FROM ch_cr
 WHERE log.id = ch_cr.ch;
 
+-- Reorder other log an creation if needed 2214099
+WITH ch_cr AS (
+    SELECT 
+        ch.id as ch, cr.id as cr, 
+        cr.event_date as event_date, 
+        cr.create_date as create_date
+    FROM sale_order_log ch
+    JOIN sale_order_log cr ON cr.order_id = ch.order_id
+    WHERE cr.event_type = '0_creation' 
+    AND (cr.event_date > ch.event_date OR cr.create_date > cr.create_date)
+)
+UPDATE sale_order_log log
+SET create_date = GREATEST(log.create_date, ch_cr.create_date + interval '1 second'),
+    event_date = GREATEST(log.event_date, ch_cr.event_date)
+FROM ch_cr
+WHERE log.id = ch_cr.ch;
+
 -- Compute amount_signed if doesn't exist based on recurring_monthly
 WITH new AS (
     SELECT 
