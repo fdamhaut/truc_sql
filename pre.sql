@@ -78,7 +78,7 @@ WHERE event_type = '0_creation'
 AND id NOT IN (
     SELECT DISTINCT ON (order_id) id
     FROM sale_order_log
-    ORDER BY order_id, create_date, event_type
+    ORDER BY order_id, event_date, create_date, id
 );
 
 -- Churn that are not the last log are changed into contraction M22072142742208 M19103012676864 M20120421642477 M22070942264774
@@ -87,7 +87,7 @@ SET event_type = '15_contraction'
 WHERE event_type = '2_churn' AND id NOT IN (
     SELECT DISTINCT ON (order_id) id
     FROM sale_order_log
-    ORDER BY order_id, create_date DESC, event_type DESC
+    ORDER BY order_id, event_date DESC, create_date DESC, id DESC
 );
 
 -- Churn un progress are removed M22041138671603 M22111755165774 M19072711872346
@@ -112,7 +112,7 @@ WHERE so.id = sale_order_log.order_id
 AND sale_order_log.id IN (
     SELECT DISTINCT ON (origin_order_id) id
     FROM sale_order_log
-    ORDER BY origin_order_id, create_date, event_type, id
+    ORDER BY origin_order_id, event_date, create_date, id
 )
 AND sale_order_log.order_id = sale_order_log.origin_order_id
 AND event_type != '0_creation';
@@ -292,11 +292,29 @@ SELECT
     '0_creation'
 FROM SO;
 
+-- Reorder churn an creation if needed 2214099
+WITH ch_cr AS (
+    SELECT 
+        ch.id as ch, cr.id as cr, 
+        cr.event_date as event_date, 
+        cr.create_date as create_date
+    FROM sale_order_log ch
+    JOIN sale_order_log cr ON cr.order_id = ch.order_id
+    WHERE cr.event_type = '0_creation' 
+    AND ch.event_type = '2_churn'
+    AND (cr.event_date > ch.event_date OR cr.create_date > cr.create_date)
+)
+UPDATE sale_order_log log
+SET create_date = GREATEST(log.create_date, ch_cr.create_date + interval '1 hour'),
+    event_date = GREATEST(log.event_date, ch_cr.event_date)
+FROM ch_cr
+WHERE log.id = ch_cr.ch;
+
 -- Compute amount_signed if doesn't exist based on recurring_monthly
 WITH new AS (
     SELECT 
         recurring_monthly - LAG(recurring_monthly) 
-        OVER (PARTITION BY origin_order_id, order_id ORDER BY create_date, id) AS as,
+        OVER (PARTITION BY origin_order_id, order_id ORDER BY event_date, create_date, id) AS as,
         id
     FROM sale_order_log
 )
@@ -326,7 +344,7 @@ AND log.id IN (
     SELECT DISTINCT ON (order_id) id
     FROM sale_order_log
     WHERE event_type IN ('0_creation', '3_transfer')
-    ORDER BY order_id, create_date, id
+    ORDER BY order_id, event_date, create_date, id
 )
 AND order_id NOT IN (
     SELECT DISTINCT order_id

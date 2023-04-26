@@ -36,7 +36,7 @@ WITH SO AS (
     FROM sale_order_log log
     JOIN sale_order so ON so.id = log.order_id
     WHERE so.subscription_state IN ('3_progress', '4_paused')
-    ORDER BY log.order_id, event_date DESC, event_type DESC, log.create_date DESC, id DESC
+    ORDER BY log.order_id, event_date DESC, log.create_date DESC, id DESC
 )
 INSERT INTO sale_order_log (
 	company_id,

@@ -5,7 +5,8 @@ import psycopg2.extras
 import sys
 from collections import defaultdict
 
-to_show = 2231129
+to_show = 2299843
+test = True
 
 conn = psycopg2.connect("dbname=openerp port=5431")
 cr = conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
@@ -41,7 +42,7 @@ prec_order = {}
 cr.execute('''
     SELECT *, coalesce(origin_order_id, order_id) as ooid
     FROM sale_order_log
-    ORDER BY coalesce(origin_order_id, order_id), order_id, create_date, id
+    ORDER BY coalesce(origin_order_id, order_id), order_id, event_date, create_date, id
     ''')
 
 logs = cr.fetchall()
@@ -277,6 +278,34 @@ for order_id,logs in orders.items():
     # Fix number of transfer
     cre = sum(map(lambda s:s['event_type'] == '0_creation', logs))
     ch = sum(map(lambda s:s['event_type'] == '2_churn', logs))
+
+    # remove excess churn
+    if ch > 1:
+        chtr = chtr_id = []
+        for n, l in enumerate(logs):
+            if l['event_type'] == '2_churn':
+                chtr += [n]
+                chtr_id += [l['id']]
+        chtr = chtr[:-1]
+        chtr_id = chtr_id[:-1]
+        cr.execute('DELETE from sale_order_log where id in %s', (tuple(chtr_id),))
+        for n in reversed(chtr):
+            del logs[n]
+
+    # remove excess creation
+    if cre > 1:
+        cretr = cretr_id = []
+        for n, l in enumerate(logs):
+            if l['event_type'] == '0_creation':
+                cretr += [n]
+                cretr_id += [l['id']]
+        cretr = cretr[1:]
+        cretr_id = cretr_id[1:]
+        cr.execute('DELETE from sale_order_log where id in %s', (tuple(cretr_id),))
+        for n in reversed(cretr):
+            del logs[n]
+
+
     ltr = []
     ltr_id = []
     for n, l in enumerate(logs):
@@ -284,7 +313,7 @@ for order_id,logs in orders.items():
             ltr += [n]
             ltr_id += [l['id']]
 
-    t = cre + ch + len(ltr)
+    t = min(cre, 1) + min(ch, 1) + len(ltr)
     # Remove all logs if we could not reconcile
     if order_id in has_next and t < 2:
         end = 0
@@ -309,46 +338,45 @@ show(0, 'end')
 
 print('IN Done')
 
-# After pre.sql
+if test: 
+    orders = defaultdict(list)
+    has_next = set()
+    prec_order = {}
 
-orders = defaultdict(list)
-has_next = set()
-prec_order = {}
+    cr.execute('''
+        SELECT *, coalesce(origin_order_id, order_id) as ooid
+        FROM sale_order_log
+        ORDER BY coalesce(origin_order_id, order_id), order_id, event_date, create_date, id
+        ''')
+    logs = cr.fetchall()
 
-cr.execute('''
-    SELECT *, coalesce(origin_order_id, order_id) as ooid
-    FROM sale_order_log
-    ORDER BY coalesce(origin_order_id, order_id), order_id, create_date, id
-    ''')
-logs = cr.fetchall()
+    for log in logs:
+        orders[log['order_id']].append(log)
 
-for log in logs:
-    orders[log['order_id']].append(log)
+    cr.execute('''
+        SELECT id, subscription_id
+        FROM sale_order
+        WHERE subscription_id IS NOT NULL
+        AND subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
+        ''')
+    sos = cr.fetchall()
 
-cr.execute('''
-    SELECT id, subscription_id
-    FROM sale_order
-    WHERE subscription_id IS NOT NULL
-    AND subscription_state IN ('3_progress', '4_paused', '5_renewed', '6_churn')
-    ''')
-sos = cr.fetchall()
-
-for so in sos:
-    has_next.add(so['subscription_id'])
-    prec_order[so['id']] = so['subscription_id']
+    for so in sos:
+        has_next.add(so['subscription_id'])
+        prec_order[so['id']] = so['subscription_id']
 
 
-show(0, 'truth')
+    show(0, 'truth')
 
-for order_id,logs in orders.items():
-    new = sum(map(lambda s:s['event_type'] == '0_creation', logs))
-    chu = sum(map(lambda s:s['event_type'] == '2_churn', logs))
-    tr = sum(map(lambda s:s['event_type'] == '3_transfer', logs))
+    for order_id,logs in orders.items():
+        new = sum(map(lambda s:s['event_type'] == '0_creation', logs))
+        chu = sum(map(lambda s:s['event_type'] == '2_churn', logs))
+        tr = sum(map(lambda s:s['event_type'] == '3_transfer', logs))
 
-    if new > 1 or chu > 1 or new+chu+tr > 2 or (order_id in has_next and new+chu+tr != 2):
-        show_table(logs)
-        print(f'Error in {order_id} : Wrong number of special {new}, {chu}, {tr}, expected : {2 if order_id in has_next else 1}, got : {new+chu+tr}')
-        assert 0 == 1
+        if new > 1 or chu > 1 or new+chu+tr > 2 or (order_id in has_next and new+chu+tr != 2):
+            show_table(logs)
+            print(f'Error in {order_id} : Wrong number of special {new}, {chu}, {tr}, expected : {2 if order_id in has_next else 1}, got : {new+chu+tr}')
+            assert 0 == 1
 
 
 conn.commit()
