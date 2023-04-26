@@ -2,7 +2,7 @@ BEGIN;
 
 UPDATE sale_order
 SET subscription_state = '6_churn', state = 'sale'
-WHERE subscription_state in ('3_progress', '4_paused') AND state = 'cancel';
+WHERE subscription_state in ('3_progress', '4_paused', '5_renewed', '6_churn') AND state = 'cancel';
 
 UPDATE sale_order
 SET subscription_state = '1_draft'
