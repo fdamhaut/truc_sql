@@ -127,8 +127,8 @@ WHERE amount_signed > 0 AND event_type = '15_contraction';
 -- Currency change
 WITH currency_change AS (
     SELECT 
-        currency_id - LAG(currency_id) OVER (PARTITION BY order_id ORDER BY create_date, id) AS cc,
-        LAG(currency_id) OVER (PARTITION BY order_id ORDER BY create_date, id) as old_c,
+        currency_id - LAG(currency_id) OVER (PARTITION BY order_id ORDER BY event_date, create_date, id) AS cc,
+        LAG(currency_id) OVER (PARTITION BY order_id ORDER BY event_date, create_date, id) as old_c,
         id as new_id
     FROM sale_order_log
 )
@@ -142,11 +142,11 @@ AND recurring_monthly != amount_signed;
 
 WITH currency_change AS (
     SELECT 
-        currency_id - LAG(currency_id) OVER (PARTITION BY order_id ORDER BY create_date, id) AS cc,
+        currency_id - LAG(currency_id) OVER (PARTITION BY order_id ORDER BY event_date, create_date, id) AS cc,
         id as new_id,
         currency_id as c,
-        LAG(currency_id) OVER (PARTITION BY order_id ORDER BY create_date, id) as old_c,
-        LAG(recurring_monthly) OVER (PARTITION BY order_id ORDER BY create_date, id) as old_rm
+        LAG(currency_id) OVER (PARTITION BY order_id ORDER BY event_date, create_date, id) as old_c,
+        LAG(recurring_monthly) OVER (PARTITION BY order_id ORDER BY event_date, create_date, id) as old_rm
     FROM sale_order_log
 )
 INSERT INTO sale_order_log (
