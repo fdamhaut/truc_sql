@@ -1,16 +1,12 @@
 BEGIN;
-TRUNCATE sale_order_log;
-
-INSERT INTO sale_order_log (SELECT * FROM sale_order_log_bcp);
-
--- TRUNCATE sale_order;
-
--- INSERT INTO sale_order (SELECT * FROM sale_order_bcp);
-
 
 UPDATE sale_order
-SET subscription_state = NULL
-WHERE subscription_state is not NULL AND state = 'cancel';
+SET subscription_state = '6_churn', state = 'sale'
+WHERE subscription_state in ('3_progress', '4_paused') AND state = 'cancel';
+
+UPDATE sale_order
+SET subscription_state = '1_draft'
+WHERE subscription_state is null AND state = 'cancel' AND is_subscription;
 
 -- Change renewed with no child to churned M22112156233162, M22112156233162, M22112156233162, M22112156233162
 UPDATE sale_order 
@@ -239,12 +235,6 @@ SELECT
     SO.rm,
     '2_churn'
 FROM SO;
-
--- Delete empty logs
-DELETE FROM sale_order_log
-WHERE recurring_monthly = 0
-AND (amount_signed IS NULL or amount_signed = 0)
-AND event_type IN ('1_expansion', '15_contraction');
 
 -- Ensure every active SO has at least a log
 WITH SO AS (
