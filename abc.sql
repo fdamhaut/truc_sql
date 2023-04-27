@@ -452,33 +452,41 @@ WHERE id IN (
 );
 
 
--- -- Merge multiple expansion/contraction log happening on the same day for the same SO (not contract)
--- -- First SUM the added users
--- WITH sum AS (
---     SELECT order_id, event_date, COALESCE(referrer_id, -1) as referrer_id, SUM(COALESCE(new_enterprise_user, 0)) as user
---     FROM sale_order_log
---     WHERE event_type IN ('1_expansion', '15_contraction')
---     GROUP BY order_id, event_date, referrer_id
--- )
--- UPDATE sale_order_log log
--- SET new_enterprise_user = sum.user
--- FROM sum
--- WHERE log.order_id = sum.order_id 
--- AND log.event_date = sum.event_date
--- AND COALESCE(log.referrer_id, -1) = sum.referrer_id
--- AND event_type IN ('1_expansion', '15_contraction');
+-- Merge multiple expansion/contraction log happening on the same day for the same SO (not contract)
+-- First SUM the added users
+WITH sum AS (
+    SELECT count(1) as c, order_id, date_trunc('month', event_date) as event_date, 
+        COALESCE(referrer_id, -1) as referrer_id, 
+        SUM(COALESCE(new_enterprise_user, 0)) as user,
+        SUM(amount_signed) as a_s,
+        currency_id
+    FROM sale_order_log
+    WHERE event_type IN ('1_expansion', '15_contraction')
+    GROUP BY order_id, date_trunc('month', event_date), referrer_id, currency_id
+)
+UPDATE sale_order_log log
+SET new_enterprise_user = sum.user,
+    amount_signed = sum.a_s
+FROM sum
+WHERE log.order_id = sum.order_id 
+AND log.currency_id = sum.currency_id
+AND c > 1
+AND date_trunc('month', log.event_date) = date_trunc('month', sum.event_date)
+AND COALESCE(log.referrer_id, -1) = sum.referrer_id
+AND event_type IN ('1_expansion', '15_contraction');
 
--- -- Then the removal of log
--- DELETE 
--- FROM sale_order_log
--- WHERE event_type IN ('1_expansion', '15_contraction')
--- AND id NOT IN (
---     SELECT DISTINCT ON (order_id, event_date, referrer_id) id
---     FROM sale_order_log
---     WHERE event_type IN ('1_expansion', '15_contraction')
---     ORDER BY order_id, event_date DESC, referrer_id, create_date DESC
--- );
--- --END MERGE
+-- Then the removal of log
+DELETE 
+FROM sale_order_log
+WHERE event_type IN ('1_expansion', '15_contraction')
+AND id NOT IN (
+    SELECT DISTINCT ON (order_id, date_trunc('month', event_date), COALESCE(referrer_id, -1), currency_id) id
+    FROM sale_order_log
+    WHERE event_type IN ('1_expansion', '15_contraction')
+    ORDER BY order_id, date_trunc('month', event_date) DESC, COALESCE(referrer_id, -1), currency_id, event_date DESC, create_date DESC, id DESC
+);
+
+--END MERGE
 
 -- -- Compute amount_signed based on recurring_monthly
 -- WITH new AS (
@@ -706,35 +714,74 @@ JOIN SO ON last.order_id = SO.id
 JOIN ent_sum ON ent_sum.order_id = SO.id
 WHERE last.id = log.id;
 
--- Reconcile based on SO
-WITH SO AS (
-    SELECT DISTINCT ON (log.order_id) log.id, so.recurring_monthly, so.subscription_state, so.currency_id
-    FROM sale_order_log log
-    JOIN sale_order so ON so.id = log.order_id
-    WHERE so.subscription_state IN ('5_renewed', '6_churn')
-    ORDER BY log.order_id, event_date DESC, log.create_date DESC, id DESC
+WITH logs AS (
+    SELECT order_id, sum(amount_signed) as s
+    FROM sale_order_log
+    GROUP BY order_id
 )
-SELECT 
-    log.company_id,
-    log.user_id,
-    log.team_id,
-    log.order_id, 
-    log.origin_order_id, 
-    log.subscription_code,
-    log.event_date,
-    log.create_date,
-    SO.currency_id,
-    SO.subscription_state,
-    SO.recurring_monthly,
-    SO.recurring_monthly - log.recurring_monthly ,
-    GREATEST(SO.recurring_monthly - log.recurring_monthly, 0),
-    GREATEST(-SO.recurring_monthly + log.recurring_monthly, 0),
-    CASE WHEN SO.recurring_monthly - log.recurring_monthly > 0 THEN '1_expansion' ELSE '15_contraction' END
-FROM sale_order_log log
-JOIN SO ON SO.id = log.id
-WHERE SO.recurring_monthly != log.recurring_monthly OR SO.currency_id != log.currency_id;
+SELECT so.id, so.recurring_monthly, s
+FROM sale_order so
+JOIN logs ON logs.order_id = so.id
+WHERE so.subscription_state IN ('4_paused', '3_progress')
+AND s != so.recurring_monthly;
+
+WITH logs AS (
+    SELECT order_id, sum(amount_signed) as s
+    FROM sale_order_log
+    GROUP BY order_id
+)
+SELECT so.id, so.recurring_monthly, s
+FROM sale_order so
+JOIN logs ON logs.order_id = so.id
+WHERE so.subscription_state IN ('5_renewed', '6_churn')
+AND s != 0;
+
+
 
 
 2198913
 
+-- Reorder churn an creation if needed 2214099
+WITH ch_cr AS (
+    SELECT 
+        ch.id as ch, cr.id as cr, 
+        cr.event_date as event_date, 
+        cr.create_date as create_date
+    FROM sale_order_log ch
+    JOIN sale_order_log cr ON cr.order_id = ch.order_id
+    WHERE cr.event_type = '0_creation' 
+    AND ch.event_type = '2_churn'
+    AND (cr.event_date > ch.event_date OR cr.create_date > cr.create_date)
+)
+UPDATE sale_order_log log
+SET create_date = GREATEST(log.create_date, ch_cr.create_date + interval '1 hour'),
+    event_date = GREATEST(log.event_date, ch_cr.event_date)
+FROM ch_cr
+WHERE log.id = ch_cr.ch;
 
+
+WITH ch_cr AS (
+    SELECT 
+        ch.id as ch, cr.id as cr, 
+        cr.event_date as event_date, 
+        cr.create_date as create_date
+    FROM sale_order_log ch
+    JOIN sale_order_log cr ON cr.order_id = ch.order_id
+    WHERE cr.event_type = '0_creation' 
+    AND ch.event_type = '2_churn'
+    AND (cr.event_date > ch.event_date OR cr.create_date > cr.create_date)
+)
+SELECT log.create_date, GREATEST(log.create_date, ch_cr.create_date + interval '1 hour'), log.event_date, GREATEST(log.event_date, ch_cr.event_date)
+FROM sale_order_log log
+JOIN ch_cr ON log.id = ch_cr.ch;
+
+
+
+select sum(amount_signed), res_currency.name from sale_order_log 
+join res_currency on res_currency.id = sale_order_log.currency_id group by res_currency.name;
+
+
+select sum(recurring_monthly), res_currency.name from sale_order 
+join res_currency on res_currency.id = sale_order.currency_id 
+where sale_order.subscription_state IN ('3_progress', '4_paused')
+group by res_currency.name;

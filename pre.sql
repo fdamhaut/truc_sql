@@ -198,11 +198,11 @@ FROM SO;
 
 -- We add churned log to churned SO with no churn log M20092219749813 M1608031437668 M140703666487
 WITH SO AS (
-    SELECT so.id, COALESCE(end_date, next_invoice_date) as end_date, origin_order_id, client_order_ref, 
+    SELECT so.id, COALESCE(end_date, l.event_date) as end_date, origin_order_id, client_order_ref, 
         currency_id, subscription_state, l.recurring_monthly as rm, company_id, user_id, team_id
     FROM sale_order so
     JOIN (
-        SELECT DISTINCT ON (order_id) order_id, recurring_monthly, id
+        SELECT DISTINCT ON (order_id) order_id, recurring_monthly, id, event_date
         FROM sale_order_log
         ORDER BY order_id, event_date DESC, create_date DESC, id DESC
         ) l on l.order_id = so.id
@@ -240,7 +240,7 @@ SELECT
     SO.origin_order_id,
     SO.client_order_ref, 
     LEAST(SO.end_date::date, CURRENT_DATE),
-    CURRENT_DATE,
+    LEAST(SO.end_date::timestamp, CURRENT_DATE::timestamp),
     SO.currency_id,
     SO.subscription_state,
     '0',
