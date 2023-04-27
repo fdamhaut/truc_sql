@@ -195,4 +195,50 @@ WHERE (amount_signed = 0 OR amount_signed IS NULL)
 AND event_type IN ('1_expansion', '15_contraction')
 AND (new_enterprise_user = 0 OR new_enterprise_user IS NULL);
 
+-- Ensure every active SO has at least a log
+WITH SO AS (
+    SELECT *
+    FROM sale_order
+    WHERE recurring_monthly > 0 
+    AND subscription_state IN ('3_progress', '4_paused')
+    AND id NOT IN (
+        SELECT order_id
+        FROM sale_order_log
+    )
+)
+INSERT INTO sale_order_log (
+    company_id,
+    user_id,
+    team_id,
+    order_id,
+    origin_order_id,
+    subscription_code,
+    event_date,
+    create_date,
+    currency_id,
+    subscription_state,
+    recurring_monthly,
+    amount_signed,
+    amount_expansion,
+    amount_contraction,
+    event_type
+)
+SELECT
+    company_id,
+    user_id,
+    team_id,
+    id, 
+    origin_order_id,
+    client_order_ref, 
+    date_order::date,
+    date_order,
+    currency_id,
+    subscription_state,
+    recurring_monthly,
+    recurring_monthly,
+    recurring_monthly,
+    0,
+    '0_creation'
+FROM SO;
+
 COMMIT;
