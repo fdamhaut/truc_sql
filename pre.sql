@@ -1,8 +1,16 @@
 BEGIN;
 
+TRUNCATE sale_order_log;
+
+INSERT INTO sale_order_log select * from sale_order_log_bcp;
+
 UPDATE sale_order
 SET subscription_state = '6_churn', state = 'sale'
 WHERE subscription_state in ('3_progress', '4_paused', '5_renewed', '6_churn') AND state = 'cancel';
+
+UPDATE sale_order
+SET subscription_state = '1_draft'
+WHERE subscription_state in ('3_progress', '4_paused', '5_renewed', '6_churn') AND state IN ('draft', 'sent') AND is_subscription;
 
 UPDATE sale_order
 SET subscription_state = '1_draft'
@@ -23,12 +31,18 @@ WHERE id IN (
     )
 );
 
+-- Remove subscription state if not a subscription/upsell 3180175 3016454
+UPDATE sale_order
+SET subscription_state = NULL
+WHERE is_subscription = FALSE AND subscription_state != '7_upsell'; 
+
 -- Remove log from cancelled SO M1811038904534 M23011767584878 M1809248620518 M1808078312543
 DELETE FROM sale_order_log
 WHERE order_id IN (
     SELECT id
     FROM sale_order so
-    WHERE state IN ('cancel', 'draft', 'sent')
+    WHERE state IN ('cancel', 'draft', 'sent') 
+    OR subscription_state IS NULL
 );
 
 -- Correct Error from 8a8080ed4f75c811cf0e92065a86f4723a4aaced M21092030723035 M21092030731668 M21082429835776
