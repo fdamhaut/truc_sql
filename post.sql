@@ -111,19 +111,6 @@ FROM new
 WHERE new.id = sale_order_log.id 
 AND amount_signed != COALESCE(new.as, recurring_monthly);
 
--- Recompute contraction and expansion value
-UPDATE sale_order_log
-SET amount_contraction = -amount_signed,
-    amount_expansion = 0,
-    event_type = '15_contraction'
-WHERE amount_signed < 0 AND event_type = '1_expansion';
-
-UPDATE sale_order_log
-SET amount_contraction = 0,
-    amount_expansion = amount_signed,
-    event_type = '1_expansion'
-WHERE amount_signed > 0 AND event_type = '15_contraction';
-
 -- Currency change
 WITH currency_change AS (
     SELECT 
@@ -187,6 +174,53 @@ JOIN currency_change cc ON log.id = cc.new_id
 WHERE cc.cc != 0 
 AND cc.old_c IS NOT NULL
 AND cc.old_rm != 0; 
+
+-- Merge multiple expansion/contraction log happening on the same day for the same SO (not contract)
+-- First SUM the added users
+WITH sum AS (
+    SELECT count(1) as c, order_id, date_trunc('month', event_date) as event_date, 
+        COALESCE(referrer_id, -1) as referrer_id, 
+        SUM(COALESCE(new_enterprise_user, 0)) as user,
+        SUM(amount_signed) as a_s,
+        currency_id
+    FROM sale_order_log
+    WHERE event_type IN ('1_expansion', '15_contraction')
+    GROUP BY order_id, date_trunc('month', event_date), referrer_id, currency_id
+)
+UPDATE sale_order_log log
+SET new_enterprise_user = sum.user,
+    amount_signed = sum.a_s
+FROM sum
+WHERE log.order_id = sum.order_id 
+AND log.currency_id = sum.currency_id
+AND c > 1
+AND date_trunc('month', log.event_date) = date_trunc('month', sum.event_date)
+AND COALESCE(log.referrer_id, -1) = sum.referrer_id
+AND event_type IN ('1_expansion', '15_contraction');
+
+-- Then the removal of log
+DELETE 
+FROM sale_order_log
+WHERE event_type IN ('1_expansion', '15_contraction')
+AND id NOT IN (
+    SELECT DISTINCT ON (order_id, date_trunc('month', event_date), COALESCE(referrer_id, -1), currency_id) id
+    FROM sale_order_log
+    WHERE event_type IN ('1_expansion', '15_contraction')
+    ORDER BY order_id, date_trunc('month', event_date) DESC, COALESCE(referrer_id, -1), currency_id, event_date DESC, create_date DESC, id DESC
+);
+
+-- Recompute contraction and expansion value
+UPDATE sale_order_log
+SET amount_contraction = -amount_signed,
+    amount_expansion = 0,
+    event_type = '15_contraction'
+WHERE amount_signed < 0 AND event_type = '1_expansion';
+
+UPDATE sale_order_log
+SET amount_contraction = 0,
+    amount_expansion = amount_signed,
+    event_type = '1_expansion'
+WHERE amount_signed > 0 AND event_type = '15_contraction';
 
 -- Delete empty log
 DELETE
