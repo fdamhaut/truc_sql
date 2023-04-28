@@ -5,8 +5,8 @@ import psycopg2.extras
 import sys
 from collections import defaultdict
 
-to_show = 2299843
-test = True
+to_show = -1
+test = False
 
 conn = psycopg2.connect("dbname=openerp port=5431")
 cr = conn.cursor(cursor_factory = psycopg2.extras.RealDictCursor)
